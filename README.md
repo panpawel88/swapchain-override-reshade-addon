@@ -1,5 +1,8 @@
 # Swapchain Override Addon for ReShade
 
+![Build Status](https://github.com/panpawel88/swapchain-override-reshade-addon/actions/workflows/build.yml/badge.svg)
+![Release](https://github.com/panpawel88/swapchain-override-reshade-addon/actions/workflows/release.yml/badge.svg)
+
 A minimal "Hello World" ReShade addon template. This serves as a starting point for creating custom ReShade addons.
 
 ## Features
@@ -9,6 +12,7 @@ A minimal "Hello World" ReShade addon template. This serves as a starting point 
 - Event callback system example
 - Clean CMake build configuration
 - Cross-platform compatible (Windows)
+- Automated CI/CD with GitHub Actions
 
 ## Prerequisites
 
@@ -53,10 +57,15 @@ cmake -B build32 -G "Ninja Multi-Config" -A Win32
 cmake --build build32 --config Release
 ```
 
-### 3. Install the Addon
+### 3. Download Pre-built Releases (Recommended)
 
-After building, you'll find:
-- `swapchain_override_addon64.dll` (or `.addon`) in the build directory
+You can download pre-built `.addon` files from the [Releases](https://github.com/panpawel88/swapchain-override-reshade-addon/releases) page.
+
+### 4. Install the Addon
+
+After building or downloading, you'll find:
+- `swapchain_override_addon64.addon` for 64-bit applications
+- `swapchain_override_addon32.addon` for 32-bit applications
 
 **Installation Steps:**
 
@@ -71,6 +80,10 @@ The addon will automatically be loaded by ReShade and will log "Hello World! ReS
 
 ```
 swapchain-override-addon/
+├── .github/
+│   └── workflows/
+│       ├── build.yml      # CI workflow for automated builds
+│       └── release.yml    # Release workflow for creating releases
 ├── CMakeLists.txt          # Build configuration
 ├── README.md               # This file
 ├── src/

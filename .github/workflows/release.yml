@@ -1,0 +1,90 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup MSVC
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Build x64
+      run: |
+        cmake -B build64 -G "Visual Studio 17 2022" -A x64
+        cmake --build build64 --config Release
+
+    - name: Build Win32
+      run: |
+        cmake -B build32 -G "Visual Studio 17 2022" -A Win32
+        cmake --build build32 --config Release
+
+    - name: Create release package
+      run: |
+        mkdir release
+        copy build64\Release\swapchain_override_addon64.addon release\
+        copy build32\Release\swapchain_override_addon32.addon release\
+        copy README.md release\
+      shell: cmd
+
+    - name: Get version
+      id: get_version
+      run: |
+        if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+          $version = "${{ github.event.inputs.version }}"
+        } else {
+          $version = "${{ github.ref_name }}"
+        }
+        echo "version=$version" >> $env:GITHUB_OUTPUT
+      shell: pwsh
+
+    - name: Create ZIP archive
+      run: |
+        Compress-Archive -Path release\* -DestinationPath swapchain-override-addon-${{ steps.get_version.outputs.version }}.zip
+      shell: pwsh
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.get_version.outputs.version }}
+        name: Release ${{ steps.get_version.outputs.version }}
+        draft: false
+        prerelease: false
+        files: |
+          swapchain-override-addon-${{ steps.get_version.outputs.version }}.zip
+          release/*.addon
+        body: |
+          ## ReShade Addon Release ${{ steps.get_version.outputs.version }}
+
+          ### Installation
+          1. Download the appropriate `.addon` file for your architecture:
+             - `swapchain_override_addon64.addon` for 64-bit applications
+             - `swapchain_override_addon32.addon` for 32-bit applications
+          2. Place the file in your ReShade addon directory
+          3. Restart your application
+
+          ### Changes
+          See commit history for detailed changes.
+
+          ---
+          🤖 Built with GitHub Actions
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
