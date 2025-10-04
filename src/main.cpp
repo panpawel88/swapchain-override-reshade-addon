@@ -195,6 +195,19 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
     if (g_config.force_width == 0 || g_config.force_height == 0)
         return;
 
+    // Check if we have pending data for this swapchain's window
+    // This indicates we actually modified the swapchain in on_create_swapchain
+    WindowHandle hwnd = swapchain_ptr->get_hwnd();
+    bool was_modified = false;
+
+    {
+        std::lock_guard<std::mutex> lock(g_pending_mutex);
+        was_modified = (hwnd != nullptr && g_pending_swapchains.find(hwnd) != g_pending_swapchains.end());
+    }
+
+    if (!was_modified)
+        return; // This swapchain wasn't modified, no override needed
+
     std::lock_guard<std::mutex> lock(g_swapchain_mutex);
 
     device* device_ptr = swapchain_ptr->get_device();
@@ -206,16 +219,9 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
     if (back_buffer_count == 0)
         return;
 
-    // Get the actual swapchain back buffer to determine if override is needed
+    // Get the actual swapchain back buffer
     resource actual_back_buffer = swapchain_ptr->get_back_buffer(0);
     resource_desc actual_desc = device_ptr->get_resource_desc(actual_back_buffer);
-
-    // Check if this swapchain was modified (actual size matches our forced size)
-    const bool needs_override = (actual_desc.texture.width == g_config.force_width &&
-                                  actual_desc.texture.height == g_config.force_height);
-
-    if (!needs_override)
-        return; // This swapchain wasn't modified
 
     // Create or retrieve swapchain data
     SwapchainData* data = nullptr;
@@ -241,7 +247,6 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
     data->override_active = true;
 
     // Retrieve the original requested size from pending map
-    WindowHandle hwnd = swapchain_ptr->get_hwnd();
     bool found_original_size = false;
 
     if (hwnd != nullptr)
