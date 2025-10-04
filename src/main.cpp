@@ -124,8 +124,12 @@ struct SwapchainData
     }
 };
 
-// Global map to track swapchain data
-static std::unordered_map<uint64_t, SwapchainData*> g_swapchain_data;
+// Type aliases for clarity
+using SwapchainNativeHandle = uint64_t;  // Native swapchain handle (IDXGISwapChain*, VkSwapchainKHR, etc.)
+using WindowHandle = void*;              // Window handle (HWND, etc.)
+
+// Global map to track swapchain data (keyed by native swapchain handle)
+static std::unordered_map<SwapchainNativeHandle, SwapchainData*> g_swapchain_data;
 static std::mutex g_swapchain_mutex;
 
 // Temporary storage for original dimensions (keyed by window handle)
@@ -135,7 +139,7 @@ struct PendingSwapchainInfo
     uint32_t original_width;
     uint32_t original_height;
 };
-static std::unordered_map<void*, PendingSwapchainInfo> g_pending_swapchains;
+static std::unordered_map<WindowHandle, PendingSwapchainInfo> g_pending_swapchains;
 static std::mutex g_pending_mutex;
 
 // ============================================================================
@@ -168,7 +172,7 @@ static bool on_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd
         PendingSwapchainInfo info;
         info.original_width = requested_width;
         info.original_height = requested_height;
-        g_pending_swapchains[hwnd] = info;
+        g_pending_swapchains[static_cast<WindowHandle>(hwnd)] = info;
     }
 
     // Override the swapchain description
@@ -215,7 +219,7 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
 
     // Create or retrieve swapchain data
     SwapchainData* data = nullptr;
-    const uint64_t swapchain_handle = swapchain_ptr->get_native();
+    const SwapchainNativeHandle swapchain_handle = swapchain_ptr->get_native();
 
     auto it = g_swapchain_data.find(swapchain_handle);
     if (it != g_swapchain_data.end())
@@ -237,7 +241,7 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
     data->override_active = true;
 
     // Retrieve the original requested size from pending map
-    void* hwnd = swapchain_ptr->get_hwnd();
+    WindowHandle hwnd = swapchain_ptr->get_hwnd();
     bool found_original_size = false;
 
     if (hwnd != nullptr)
@@ -313,7 +317,7 @@ static void on_present(command_queue* queue, swapchain* swapchain_ptr, const rec
 
     std::lock_guard<std::mutex> lock(g_swapchain_mutex);
 
-    const uint64_t swapchain_handle = swapchain_ptr->get_native();
+    const SwapchainNativeHandle swapchain_handle = swapchain_ptr->get_native();
     auto it = g_swapchain_data.find(swapchain_handle);
 
     if (it == g_swapchain_data.end() || !it->second->override_active)
@@ -381,7 +385,7 @@ static void on_destroy_swapchain(swapchain* swapchain_ptr, bool is_resize)
 
     std::lock_guard<std::mutex> lock(g_swapchain_mutex);
 
-    const uint64_t swapchain_handle = swapchain_ptr->get_native();
+    const SwapchainNativeHandle swapchain_handle = swapchain_ptr->get_native();
     auto it = g_swapchain_data.find(swapchain_handle);
 
     if (it != g_swapchain_data.end())
