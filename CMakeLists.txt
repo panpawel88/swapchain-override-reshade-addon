@@ -10,11 +10,79 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/reshade/include/reshade.hpp")
     message(FATAL_ERROR "ReShade submodule not found. Run: git submodule update --init --recursive")
 endif()
 
+# Find fxc.exe for shader compilation
+find_program(FXC_EXECUTABLE fxc
+    PATHS
+        "C:/Program Files (x86)/Windows Kits/10/bin/*/x64"
+        "C:/Program Files (x86)/Windows Kits/10/bin/*/x86"
+    NO_DEFAULT_PATH
+)
+
+if(NOT FXC_EXECUTABLE)
+    message(WARNING "fxc.exe not found. Shaders will not be compiled. Please compile manually or install Windows SDK.")
+endif()
+
+# Function to compile HLSL shaders
+function(compile_shader SHADER_FILE SHADER_TYPE ENTRY_POINT OUTPUT_FILE)
+    if(FXC_EXECUTABLE)
+        add_custom_command(
+            OUTPUT ${OUTPUT_FILE}
+            COMMAND ${FXC_EXECUTABLE} /T ${SHADER_TYPE} /E ${ENTRY_POINT} /Fo ${OUTPUT_FILE} ${SHADER_FILE}
+            DEPENDS ${SHADER_FILE}
+            COMMENT "Compiling shader: ${SHADER_FILE}"
+            VERBATIM
+        )
+    else()
+        # Create a dummy target if FXC is not available
+        add_custom_command(
+            OUTPUT ${OUTPUT_FILE}
+            COMMAND ${CMAKE_COMMAND} -E echo "Warning: Shader ${SHADER_FILE} not compiled (fxc.exe not found)"
+            COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT_FILE}
+            DEPENDS ${SHADER_FILE}
+        )
+    endif()
+endfunction()
+
+# Compile shaders
+set(SHADER_OUTPUT_DIR "${CMAKE_BINARY_DIR}/shaders")
+file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
+
+compile_shader(
+    "${CMAKE_SOURCE_DIR}/shaders/fullscreen_vs.hlsl"
+    "vs_4_0"
+    "main"
+    "${SHADER_OUTPUT_DIR}/fullscreen_vs.cso"
+)
+
+compile_shader(
+    "${CMAKE_SOURCE_DIR}/shaders/copy_ps.hlsl"
+    "ps_4_0"
+    "main"
+    "${SHADER_OUTPUT_DIR}/copy_ps.cso"
+)
+
+# Generate header file with shader bytecode
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/generated/shader_bytecode.h"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/generated"
+    COMMAND ${CMAKE_COMMAND}
+        -DSHADER_OUTPUT_DIR="${SHADER_OUTPUT_DIR}"
+        -DOUTPUT_FILE="${CMAKE_BINARY_DIR}/generated/shader_bytecode.h"
+        -P "${CMAKE_SOURCE_DIR}/cmake/GenerateShaderHeader.cmake"
+    DEPENDS
+        "${SHADER_OUTPUT_DIR}/fullscreen_vs.cso"
+        "${SHADER_OUTPUT_DIR}/copy_ps.cso"
+    COMMENT "Generating shader bytecode header"
+)
+
 # Collect source files
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 
 # Create shared library
-add_library(${PROJECT_NAME} SHARED ${SOURCES})
+add_library(${PROJECT_NAME} SHARED
+    ${SOURCES}
+    "${CMAKE_BINARY_DIR}/generated/shader_bytecode.h"
+)
 
 # Set output name
 set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -27,6 +95,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/external/reshade/include
+    ${CMAKE_BINARY_DIR}/generated
 )
 
 # Compiler-specific flags

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <string>
+#include "shader_bytecode.h"
 
 using namespace reshade::api;
 
@@ -93,7 +94,13 @@ struct SwapchainData
 
     std::vector<resource> proxy_textures;
     std::vector<resource_view> proxy_rtvs;
+    std::vector<resource_view> proxy_srvs;  // Shader resource views for proxy textures
     std::vector<resource> actual_back_buffers;  // Actual back buffer resources for comparison
+
+    // Pipeline objects for fullscreen draw
+    pipeline copy_pipeline = {};
+    pipeline_layout copy_pipeline_layout = {};
+    sampler copy_sampler = {};
 
     device* device_ptr = nullptr;
 
@@ -117,11 +124,26 @@ struct SwapchainData
     {
         if (device_ptr != nullptr)
         {
+            // Destroy pipeline objects
+            if (copy_pipeline.handle != 0)
+                device_ptr->destroy_pipeline(copy_pipeline);
+            if (copy_pipeline_layout.handle != 0)
+                device_ptr->destroy_pipeline_layout(copy_pipeline_layout);
+            if (copy_sampler.handle != 0)
+                device_ptr->destroy_sampler(copy_sampler);
+
             // Destroy proxy resource views
             for (auto rtv : proxy_rtvs)
             {
                 if (rtv.handle != 0)
                     device_ptr->destroy_resource_view(rtv);
+            }
+
+            // Destroy proxy SRVs
+            for (auto srv : proxy_srvs)
+            {
+                if (srv.handle != 0)
+                    device_ptr->destroy_resource_view(srv);
             }
 
             // Destroy proxy resources
@@ -132,7 +154,12 @@ struct SwapchainData
             }
         }
 
+        copy_pipeline = {};
+        copy_pipeline_layout = {};
+        copy_sampler = {};
+
         proxy_rtvs.clear();
+        proxy_srvs.clear();
         proxy_textures.clear();
         actual_back_buffers.clear();
     }
@@ -323,10 +350,72 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
         }
     }
 
+    // Create shader resource views for proxy textures (for sampling during copy)
+    data->proxy_srvs.resize(back_buffer_count);
+    for (uint32_t i = 0; i < back_buffer_count; ++i)
+    {
+        resource_view_desc srv_desc = {};
+        srv_desc.type = resource_view_type::texture_2d;
+        srv_desc.format = actual_desc.texture.format;
+        srv_desc.texture.first_level = 0;
+        srv_desc.texture.level_count = 1;
+
+        if (!device_ptr->create_resource_view(data->proxy_textures[i], resource_usage::shader_resource, srv_desc, &data->proxy_srvs[i]))
+        {
+            reshade::log::message(reshade::log::level::error,
+                ("Failed to create proxy SRV " + std::to_string(i)).c_str());
+            data->cleanup();
+            return;
+        }
+    }
+
     // Store actual back buffer resources for comparison during bind interception
     for (uint32_t i = 0; i < back_buffer_count; ++i)
     {
         data->actual_back_buffers[i] = swapchain_ptr->get_back_buffer(i);
+    }
+
+    // Create copy pipeline (fullscreen triangle + texture sample)
+    // Pipeline layout: sampler in slot 0, SRV in slot 0
+    pipeline_layout_param layout_params[2];
+    layout_params[0] = descriptor_range { 0, 0, 0, 1, shader_stage::all, 1, descriptor_type::sampler };
+    layout_params[1] = descriptor_range { 0, 0, 0, 1, shader_stage::all, 1, descriptor_type::shader_resource_view };
+
+    if (!device_ptr->create_pipeline_layout(2, layout_params, &data->copy_pipeline_layout))
+    {
+        reshade::log::message(reshade::log::level::error, "Failed to create copy pipeline layout");
+        data->cleanup();
+        return;
+    }
+
+    // Create shaders from embedded bytecode
+    shader_desc vs_desc = { shader_bytecode::fullscreen_vs, shader_bytecode::fullscreen_vs_size };
+    shader_desc ps_desc = { shader_bytecode::copy_ps, shader_bytecode::copy_ps_size };
+
+    // Build pipeline subobjects
+    std::vector<pipeline_subobject> subobjects;
+    subobjects.push_back({ pipeline_subobject_type::vertex_shader, 1, &vs_desc });
+    subobjects.push_back({ pipeline_subobject_type::pixel_shader, 1, &ps_desc });
+
+    if (!device_ptr->create_pipeline(data->copy_pipeline_layout, static_cast<uint32_t>(subobjects.size()), subobjects.data(), &data->copy_pipeline))
+    {
+        reshade::log::message(reshade::log::level::error, "Failed to create copy pipeline");
+        data->cleanup();
+        return;
+    }
+
+    // Create sampler with the configured filter mode
+    sampler_desc sampler_desc = {};
+    sampler_desc.filter = g_config.scaling_filter;
+    sampler_desc.address_u = texture_address_mode::clamp;
+    sampler_desc.address_v = texture_address_mode::clamp;
+    sampler_desc.address_w = texture_address_mode::clamp;
+
+    if (!device_ptr->create_sampler(sampler_desc, &data->copy_sampler))
+    {
+        reshade::log::message(reshade::log::level::error, "Failed to create copy sampler");
+        data->cleanup();
+        return;
     }
 
     reshade::log::message(reshade::log::level::info,
@@ -554,36 +643,79 @@ static void on_present(command_queue* queue, swapchain* swapchain_ptr, const rec
     if (proxy_texture.handle == 0 || actual_back_buffer.handle == 0)
         return;
 
-    // Get an immediate command list to perform the copy
+    // Get an immediate command list to perform the scaled copy via fullscreen draw
     command_list* cmd_list = queue->get_immediate_command_list();
     if (cmd_list == nullptr)
         return;
 
-    // Barrier: Transition proxy texture to copy source
+    resource_view proxy_srv = data->proxy_srvs[current_index];
+    if (proxy_srv.handle == 0)
+        return;
+
+    // Create RTV for the actual back buffer (if not already created)
+    resource_view actual_rtv = {};
+    resource_desc actual_bb_desc = device_ptr->get_resource_desc(actual_back_buffer);
+    resource_view_desc rtv_desc = {};
+    rtv_desc.type = resource_view_type::texture_2d;
+    rtv_desc.format = actual_bb_desc.texture.format;
+    rtv_desc.texture.first_level = 0;
+    rtv_desc.texture.level_count = 1;
+
+    if (!device_ptr->create_resource_view(actual_back_buffer, resource_usage::render_target, rtv_desc, &actual_rtv))
+    {
+        reshade::log::message(reshade::log::level::error, "Failed to create back buffer RTV for present");
+        return;
+    }
+
+    // Barrier: Transition proxy texture to shader resource
     resource_usage proxy_old_state = resource_usage::render_target;
-    resource_usage proxy_new_state = resource_usage::copy_source;
+    resource_usage proxy_new_state = resource_usage::shader_resource;
     cmd_list->barrier(1, &proxy_texture, &proxy_old_state, &proxy_new_state);
 
-    // Barrier: Transition actual back buffer to copy dest
+    // Barrier: Transition actual back buffer to render target
     resource_usage dest_old_state = resource_usage::present;
-    resource_usage dest_new_state = resource_usage::copy_dest;
+    resource_usage dest_new_state = resource_usage::render_target;
     cmd_list->barrier(1, &actual_back_buffer, &dest_old_state, &dest_new_state);
 
-    // Copy with scaling from proxy to actual back buffer
-    cmd_list->copy_texture_region(
-        proxy_texture, 0, nullptr,  // Source: entire proxy texture
-        actual_back_buffer, 0, nullptr,  // Dest: entire actual back buffer
-        g_config.scaling_filter
-    );
+    // Bind pipeline and render states
+    cmd_list->bind_pipeline(pipeline_stage::all_graphics, data->copy_pipeline);
+
+    // Bind descriptors (sampler and SRV)
+    const sampler samplers[] = { data->copy_sampler };
+    const resource_view srvs[] = { proxy_srv };
+
+    cmd_list->push_descriptors(shader_stage::pixel, data->copy_pipeline_layout, 0,
+        descriptor_table_update { {}, 0, 0, 1, descriptor_type::sampler, samplers });
+    cmd_list->push_descriptors(shader_stage::pixel, data->copy_pipeline_layout, 1,
+        descriptor_table_update { {}, 0, 0, 1, descriptor_type::shader_resource_view, srvs });
+
+    // Bind render target
+    cmd_list->bind_render_targets_and_depth_stencil(1, &actual_rtv, {});
+
+    // Set viewport to cover entire back buffer
+    viewport vp = {};
+    vp.x = 0.0f;
+    vp.y = 0.0f;
+    vp.width = static_cast<float>(data->actual_width);
+    vp.height = static_cast<float>(data->actual_height);
+    vp.min_depth = 0.0f;
+    vp.max_depth = 1.0f;
+    cmd_list->bind_viewports(0, 1, &vp);
+
+    // Draw fullscreen triangle (3 vertices, 1 instance)
+    cmd_list->draw(3, 1, 0, 0);
 
     // Barrier: Transition resources back
-    proxy_old_state = resource_usage::copy_source;
+    proxy_old_state = resource_usage::shader_resource;
     proxy_new_state = resource_usage::render_target;
     cmd_list->barrier(1, &proxy_texture, &proxy_old_state, &proxy_new_state);
 
-    dest_old_state = resource_usage::copy_dest;
+    dest_old_state = resource_usage::render_target;
     dest_new_state = resource_usage::present;
     cmd_list->barrier(1, &actual_back_buffer, &dest_old_state, &dest_new_state);
+
+    // Clean up temporary RTV
+    device_ptr->destroy_resource_view(actual_rtv);
 }
 
 static void on_destroy_swapchain(swapchain* swapchain_ptr, bool is_resize)
