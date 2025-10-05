@@ -3,16 +3,25 @@
 ![Build Status](https://github.com/panpawel88/swapchain-override-reshade-addon/actions/workflows/build.yml/badge.svg)
 ![Release](https://github.com/panpawel88/swapchain-override-reshade-addon/actions/workflows/release.yml/badge.svg)
 
-A minimal "Hello World" ReShade addon template. This serves as a starting point for creating custom ReShade addons.
+A ReShade addon that forces a specific swapchain resolution while maintaining application compatibility through proxy textures. This allows you to run games at higher resolutions than they natively support.
+
+## Use Cases
+
+- **Legacy Games** - Run older games that don't support modern high resolutions (4K, 8K)
+- **Resolution Unlocking** - Force games with hardcoded resolution limits to render at higher resolutions
+- **Upscaling Testing** - Test how games look at different resolutions without native support
+- **Screenshot Enhancement** - Capture high-resolution screenshots from games with limited resolution options
+- **Supersampling** - Force higher internal rendering resolution for improved image quality
 
 ## Features
 
-- Minimal working ReShade addon structure
-- Logs "Hello World" message on initialization
-- Event callback system example
-- Clean CMake build configuration
-- Cross-platform compatible (Windows)
-- Automated CI/CD with GitHub Actions
+- **Forced Resolution Override** - Override swapchain resolution to any configured size (default 4K)
+- **Application Compatibility** - Uses proxy textures so applications render unaware of resolution changes
+- **Automatic Scaling** - Scales proxy textures to actual swapchain on present
+- **Configurable Settings** - Customize resolution and scaling filter via ReShade.ini
+- **Thread-Safe** - Proper mutex protection for concurrent operations
+- **Clean Resource Management** - Automatic cleanup of proxy textures and render targets
+- **Automated CI/CD** - GitHub Actions for builds and releases
 
 ## Prerequisites
 
@@ -72,9 +81,39 @@ After building or downloading, you'll find:
 1. Locate your ReShade installation directory
 2. Find the addon folder (usually in the same directory as the game executable or configured in ReShade.ini)
 3. Copy the `.addon` file to the ReShade addon directory
-4. Launch your game/application with ReShade
+4. Configure the addon settings in `ReShade.ini` (see Configuration section below)
+5. Launch your game/application with ReShade
 
-The addon will automatically be loaded by ReShade and will log "Hello World! ReShade addon initialized successfully." to the ReShade log.
+The addon will automatically be loaded by ReShade and override the swapchain resolution according to your configuration.
+
+## Configuration
+
+Add these settings to your `ReShade.ini` file under the `[APP]` section:
+
+```ini
+[APP]
+ForceSwapchainResolution=3840,2160
+SwapchainScalingFilter=1
+```
+
+### Configuration Options
+
+**ForceSwapchainResolution**
+- Format: `<width>,<height>`
+- Default: `3840,2160` (4K)
+- Example values:
+  - `1920,1080` - Full HD
+  - `2560,1440` - QHD
+  - `3840,2160` - 4K UHD
+  - `7680,4320` - 8K UHD
+
+**SwapchainScalingFilter**
+- Type: Integer (0-2)
+- Default: `1` (Linear)
+- Values:
+  - `0` - Point sampling (nearest neighbor, sharp but pixelated)
+  - `1` - Linear filtering (smooth scaling, recommended)
+  - `2` - Anisotropic filtering (highest quality for textures)
 
 ## Project Structure
 
@@ -95,52 +134,49 @@ swapchain-override-addon/
 
 ## How It Works
 
-### Addon Registration
+This addon intercepts the swapchain creation process and implements a transparent proxy texture system:
 
-The addon uses `DllMain` to register itself with ReShade:
+### 1. Swapchain Creation Override
 
-```cpp
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
-{
-    switch (fdwReason)
-    {
-    case DLL_PROCESS_ATTACH:
-        reshade::register_addon(hModule);
-        reshade::register_event<reshade::addon_event::init_effect_runtime>(on_init);
-        // ... register other events
-        break;
-    // ...
-    }
-}
-```
+When an application requests a swapchain at its original resolution, the addon:
+- Captures the original requested dimensions (e.g., 1920x1080)
+- Overrides the swapchain creation to use the configured resolution (e.g., 3840x2160)
+- Creates the actual swapchain at the higher resolution
 
-### Event Callbacks
+### 2. Proxy Texture System
 
-The addon registers callbacks for ReShade events:
+To maintain application compatibility:
+- Creates proxy textures at the application's original requested size
+- Creates matching render target views (RTVs) for the proxy textures
+- The application renders to these proxy textures, completely unaware of the override
 
-- `init_effect_runtime` - Called when ReShade initializes
-- `destroy_effect_runtime` - Called when ReShade shuts down
-- `present` - Called every frame (currently a placeholder)
+### 3. Automatic Scaling on Present
 
-## Extending the Addon
+Every frame, before presentation:
+- Transitions proxy textures to the appropriate resource state
+- Scales and copies the proxy texture content to the actual swapchain buffer
+- Uses the configured scaling filter (point, linear, or anisotropic)
+- Transitions resources back for the next frame
 
-This template provides a foundation for building custom ReShade addons. You can:
+### 4. Resource Management
 
-1. **Add more event callbacks** - See ReShade documentation for available events
-2. **Implement swapchain manipulation** - Override display modes, resolution, etc.
-3. **Add ImGui UI** - Create custom overlay interfaces
-4. **Hook graphics API calls** - Modify rendering pipeline
+- Per-swapchain data structures track proxy textures and original dimensions
+- Automatic cleanup when swapchains are destroyed
+- Thread-safe operations with mutex protection
+- Proper handling of edge cases (e.g., when requested size matches desired size)
 
-### Available ReShade Events
+### Technical Details
 
-Common events you can hook:
-- `reshade::addon_event::present` - Frame presentation
-- `reshade::addon_event::init_effect_runtime` - Runtime initialization
-- `reshade::addon_event::destroy_effect_runtime` - Runtime shutdown
-- `reshade::addon_event::create_swapchain` - Swapchain creation
-- And many more...
+**Events Hooked:**
+- `init_swapchain` - Creates proxy textures and RTVs after swapchain creation
+- `create_swapchain` - Overrides resolution before swapchain creation
+- `destroy_swapchain` - Cleans up proxy textures and associated resources
+- `present` - Performs scaling and copy operations each frame
 
-See the [ReShade API documentation](https://crosire.github.io/reshade-docs/) for a complete list.
+**Resource States:**
+- Proxy textures are transitioned to `resource_usage::copy_source`
+- Swapchain back buffers are transitioned to `resource_usage::copy_dest`
+- Proper state restoration ensures compatibility with ReShade effects
 
 ## ReShade API Resources
 
@@ -153,9 +189,33 @@ See the [ReShade API documentation](https://crosire.github.io/reshade-docs/) for
 
 MIT License - Feel free to use this template for your own addons.
 
-## Notes
+## Notes & Limitations
 
 - The addon architecture (32-bit vs 64-bit) must match your target application
 - ReShade must be built with addon support enabled
+- Performance impact depends on resolution difference and scaling filter used
+- Some games may not work properly if they have hardcoded resolution assumptions
+- The addon only affects swapchain resolution, not game UI scaling
 - Check ReShade logs for addon loading status and any error messages
 - The `.addon` file extension is required for ReShade to recognize and load the module
+
+## Troubleshooting
+
+**Game crashes or fails to start:**
+- Try lowering the forced resolution
+- Ensure the `.addon` file architecture matches your game (32-bit vs 64-bit)
+- Check ReShade logs for error messages
+
+**Performance issues:**
+- Lower the forced resolution
+- Try using point sampling (filter value 0) instead of linear/anisotropic
+- Ensure your GPU has sufficient VRAM for the higher resolution buffers
+
+**Game UI is too small:**
+- This addon doesn't scale UI elements, only the rendering resolution
+- Some games have separate UI scaling options you may need to adjust
+
+**Resolution not changing:**
+- Verify `ReShade.ini` is in the correct location and properly formatted
+- Check that the configuration is under the `[APP]` section
+- Restart the application after changing configuration
