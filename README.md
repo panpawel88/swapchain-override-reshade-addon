@@ -106,6 +106,7 @@ SwapchainScalingFilter=1
   - `2560x1440` - QHD
   - `3840x2160` - 4K UHD
   - `7680x4320` - 8K UHD
+  - `0x0` - Disable override
 
 **SwapchainScalingFilter**
 - Type: Integer (0-2)
