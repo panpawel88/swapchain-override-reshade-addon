@@ -93,16 +93,16 @@ struct SwapchainData
 
     std::vector<resource> proxy_textures;
     std::vector<resource_view> proxy_rtvs;
-    std::vector<resource_view> actual_rtvs;  // Actual back buffer RTVs for comparison
+    std::vector<resource> actual_back_buffers;  // Actual back buffer resources for comparison
 
     device* device_ptr = nullptr;
 
-    // Helper: Find proxy RTV index from actual RTV
-    int find_proxy_index(resource_view actual_rtv) const
+    // Helper: Find proxy RTV index from actual back buffer resource
+    int find_proxy_index(resource actual_resource) const
     {
-        for (size_t i = 0; i < actual_rtvs.size(); ++i)
+        for (size_t i = 0; i < actual_back_buffers.size(); ++i)
         {
-            if (actual_rtvs[i].handle == actual_rtv.handle)
+            if (actual_back_buffers[i].handle == actual_resource.handle)
                 return static_cast<int>(i);
         }
         return -1;
@@ -124,13 +124,6 @@ struct SwapchainData
                     device_ptr->destroy_resource_view(rtv);
             }
 
-            // Destroy actual back buffer RTVs
-            for (auto rtv : actual_rtvs)
-            {
-                if (rtv.handle != 0)
-                    device_ptr->destroy_resource_view(rtv);
-            }
-
             // Destroy proxy resources
             for (auto tex : proxy_textures)
             {
@@ -140,8 +133,8 @@ struct SwapchainData
         }
 
         proxy_rtvs.clear();
-        actual_rtvs.clear();
         proxy_textures.clear();
+        actual_back_buffers.clear();
     }
 };
 
@@ -295,7 +288,7 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
     // Create proxy textures at original resolution
     data->proxy_textures.resize(back_buffer_count);
     data->proxy_rtvs.resize(back_buffer_count);
-    data->actual_rtvs.resize(back_buffer_count);
+    data->actual_back_buffers.resize(back_buffer_count);
 
     for (uint32_t i = 0; i < back_buffer_count; ++i)
     {
@@ -330,25 +323,10 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
         }
     }
 
-    // Get actual back buffer RTVs for comparison during bind interception
+    // Store actual back buffer resources for comparison during bind interception
     for (uint32_t i = 0; i < back_buffer_count; ++i)
     {
-        resource back_buffer_resource = swapchain_ptr->get_back_buffer(i);
-
-        // Get the default RTV for the actual back buffer
-        resource_view_desc rtv_desc = {};
-        rtv_desc.type = resource_view_type::texture_2d;
-        rtv_desc.format = actual_desc.texture.format;
-        rtv_desc.texture.first_level = 0;
-        rtv_desc.texture.level_count = 1;
-
-        if (!device_ptr->create_resource_view(back_buffer_resource, resource_usage::render_target, rtv_desc, &data->actual_rtvs[i]))
-        {
-            reshade::log::message(reshade::log::level::error,
-                ("Failed to create actual back buffer RTV " + std::to_string(i)).c_str());
-            data->cleanup();
-            return;
-        }
+        data->actual_back_buffers[i] = swapchain_ptr->get_back_buffer(i);
     }
 
     reshade::log::message(reshade::log::level::info,
@@ -378,7 +356,12 @@ static void on_bind_render_targets_and_depth_stencil(command_list* cmd_list, uin
         if (modified_rtvs[i].handle == 0)
             continue;
 
-        // Search through all swapchains to find if this RTV matches an actual back buffer RTV
+        // Get the underlying resource from the RTV
+        resource rtv_resource = device_ptr->get_resource_from_view(modified_rtvs[i]);
+        if (rtv_resource.handle == 0)
+            continue;
+
+        // Search through all swapchains to find if this resource matches an actual back buffer
         for (auto& pair : g_swapchain_data)
         {
             SwapchainData* data = pair.second;
@@ -389,8 +372,8 @@ static void on_bind_render_targets_and_depth_stencil(command_list* cmd_list, uin
             if (data->device_ptr != device_ptr)
                 continue;
 
-            // Find if this RTV matches any actual back buffer RTV
-            int proxy_index = data->find_proxy_index(modified_rtvs[i]);
+            // Find if this resource matches any actual back buffer resource
+            int proxy_index = data->find_proxy_index(rtv_resource);
             if (proxy_index >= 0)
             {
                 // Substitute with proxy RTV
