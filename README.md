@@ -92,20 +92,20 @@ Add these settings to your `ReShade.ini` file under the `[APP]` section:
 
 ```ini
 [APP]
-ForceSwapchainResolution=3840,2160
+ForceSwapchainResolution=3840x2160
 SwapchainScalingFilter=1
 ```
 
 ### Configuration Options
 
 **ForceSwapchainResolution**
-- Format: `<width>,<height>`
-- Default: `3840,2160` (4K)
+- Format: `<width>x<height>`
+- Default: `3840x2160` (4K)
 - Example values:
-  - `1920,1080` - Full HD
-  - `2560,1440` - QHD
-  - `3840,2160` - 4K UHD
-  - `7680,4320` - 8K UHD
+  - `1920x1080` - Full HD
+  - `2560x1440` - QHD
+  - `3840x2160` - 4K UHD
+  - `7680x4320` - 8K UHD
 
 **SwapchainScalingFilter**
 - Type: Integer (0-2)
