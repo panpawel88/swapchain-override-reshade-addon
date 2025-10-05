@@ -39,7 +39,7 @@ static void load_config()
         const char width_terminator = *resolution_p++;
         const unsigned long height = std::strtoul(resolution_p, &resolution_p, 10);
 
-        if (width != 0 && height != 0 && width_terminator == ',')
+        if (width != 0 && height != 0 && width_terminator == 'x')
         {
             g_config.force_width = static_cast<uint32_t>(width);
             g_config.force_height = static_cast<uint32_t>(height);
@@ -48,7 +48,7 @@ static void load_config()
     else
     {
         // Set default config value
-        reshade::set_config_value(nullptr, "APP", "ForceSwapchainResolution", "3840,2160");
+        reshade::set_config_value(nullptr, "APP", "ForceSwapchainResolution", "3840x2160");
         g_config.force_width = 3840;
         g_config.force_height = 2160;
     }
