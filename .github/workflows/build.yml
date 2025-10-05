@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     name: Build ${{ matrix.arch }}
-    runs-on: windows-latest
+    runs-on: self-hosted
     strategy:
       matrix:
         arch: [x64, Win32]
