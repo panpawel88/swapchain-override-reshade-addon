@@ -149,8 +149,6 @@ static std::mutex g_pending_mutex;
 
 static bool on_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd)
 {
-    load_config();
-
     // If override is disabled (0,0), don't modify
     if (g_config.force_width == 0 || g_config.force_height == 0)
         return false;
