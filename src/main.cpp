@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <cstdlib>
 #include <mutex>
+#include <string>
 
 using namespace reshade::api;
 
@@ -180,8 +181,8 @@ static bool on_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd
     desc.back_buffer.texture.height = g_config.force_height;
 
     reshade::log::message(reshade::log::level::info,
-        "Swapchain override: Requested size " + std::to_string(requested_width) + "x" + std::to_string(requested_height) +
-        " -> Forced size " + std::to_string(g_config.force_width) + "x" + std::to_string(g_config.force_height));
+        ("Swapchain override: Requested size " + std::to_string(requested_width) + "x" + std::to_string(requested_height) +
+        " -> Forced size " + std::to_string(g_config.force_width) + "x" + std::to_string(g_config.force_height)).c_str());
 
     return true; // Indicate we modified the description
 }
@@ -251,7 +252,7 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
 
     if (hwnd != nullptr)
     {
-        std::lock_guard<std::mutex> lock(g_pending_mutex);
+        std::lock_guard<std::mutex> pending_lock(g_pending_mutex);
         auto pending_it = g_pending_swapchains.find(hwnd);
         if (pending_it != g_pending_swapchains.end())
         {
@@ -289,7 +290,7 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
         if (!device_ptr->create_resource(proxy_desc, nullptr, resource_usage::render_target, &data->proxy_textures[i]))
         {
             reshade::log::message(reshade::log::level::error,
-                "Failed to create proxy texture " + std::to_string(i));
+                ("Failed to create proxy texture " + std::to_string(i)).c_str());
             data->cleanup();
             return;
         }
@@ -304,15 +305,15 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
         if (!device_ptr->create_resource_view(data->proxy_textures[i], resource_usage::render_target, rtv_desc, &data->proxy_rtvs[i]))
         {
             reshade::log::message(reshade::log::level::error,
-                "Failed to create proxy RTV " + std::to_string(i));
+                ("Failed to create proxy RTV " + std::to_string(i)).c_str());
             data->cleanup();
             return;
         }
     }
 
     reshade::log::message(reshade::log::level::info,
-        "Created " + std::to_string(back_buffer_count) + " proxy textures at " +
-        std::to_string(data->original_width) + "x" + std::to_string(data->original_height));
+        ("Created " + std::to_string(back_buffer_count) + " proxy textures at " +
+        std::to_string(data->original_width) + "x" + std::to_string(data->original_height)).c_str());
 }
 
 static void on_present(command_queue* queue, swapchain* swapchain_ptr, const rect*, const rect*, uint32_t, const rect*)
@@ -351,20 +352,14 @@ static void on_present(command_queue* queue, swapchain* swapchain_ptr, const rec
         return;
 
     // Barrier: Transition proxy texture to copy source
-    barrier proxy_barrier = {};
-    proxy_barrier.type = barrier_type::transition;
-    proxy_barrier.transition.resource = proxy_texture;
-    proxy_barrier.transition.old_state = resource_usage::render_target;
-    proxy_barrier.transition.new_state = resource_usage::copy_source;
-    cmd_list->barrier(1, &proxy_barrier);
+    resource_usage proxy_old_state = resource_usage::render_target;
+    resource_usage proxy_new_state = resource_usage::copy_source;
+    cmd_list->barrier(1, &proxy_texture, &proxy_old_state, &proxy_new_state);
 
     // Barrier: Transition actual back buffer to copy dest
-    barrier dest_barrier = {};
-    dest_barrier.type = barrier_type::transition;
-    dest_barrier.transition.resource = actual_back_buffer;
-    dest_barrier.transition.old_state = resource_usage::present;
-    dest_barrier.transition.new_state = resource_usage::copy_dest;
-    cmd_list->barrier(1, &dest_barrier);
+    resource_usage dest_old_state = resource_usage::present;
+    resource_usage dest_new_state = resource_usage::copy_dest;
+    cmd_list->barrier(1, &actual_back_buffer, &dest_old_state, &dest_new_state);
 
     // Copy with scaling from proxy to actual back buffer
     cmd_list->copy_texture_region(
@@ -374,13 +369,13 @@ static void on_present(command_queue* queue, swapchain* swapchain_ptr, const rec
     );
 
     // Barrier: Transition resources back
-    proxy_barrier.transition.old_state = resource_usage::copy_source;
-    proxy_barrier.transition.new_state = resource_usage::render_target;
-    cmd_list->barrier(1, &proxy_barrier);
+    proxy_old_state = resource_usage::copy_source;
+    proxy_new_state = resource_usage::render_target;
+    cmd_list->barrier(1, &proxy_texture, &proxy_old_state, &proxy_new_state);
 
-    dest_barrier.transition.old_state = resource_usage::copy_dest;
-    dest_barrier.transition.new_state = resource_usage::present;
-    cmd_list->barrier(1, &dest_barrier);
+    dest_old_state = resource_usage::copy_dest;
+    dest_new_state = resource_usage::present;
+    cmd_list->barrier(1, &actual_back_buffer, &dest_old_state, &dest_new_state);
 }
 
 static void on_destroy_swapchain(swapchain* swapchain_ptr, bool is_resize)
