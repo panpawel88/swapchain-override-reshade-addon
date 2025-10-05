@@ -93,8 +93,20 @@ struct SwapchainData
 
     std::vector<resource> proxy_textures;
     std::vector<resource_view> proxy_rtvs;
+    std::vector<resource_view> actual_rtvs;  // Actual back buffer RTVs for comparison
 
     device* device_ptr = nullptr;
+
+    // Helper: Find proxy RTV index from actual RTV
+    int find_proxy_index(resource_view actual_rtv) const
+    {
+        for (size_t i = 0; i < actual_rtvs.size(); ++i)
+        {
+            if (actual_rtvs[i].handle == actual_rtv.handle)
+                return static_cast<int>(i);
+        }
+        return -1;
+    }
 
     ~SwapchainData()
     {
@@ -105,14 +117,21 @@ struct SwapchainData
     {
         if (device_ptr != nullptr)
         {
-            // Destroy resource views
+            // Destroy proxy resource views
             for (auto rtv : proxy_rtvs)
             {
                 if (rtv.handle != 0)
                     device_ptr->destroy_resource_view(rtv);
             }
 
-            // Destroy resources
+            // Destroy actual back buffer RTVs
+            for (auto rtv : actual_rtvs)
+            {
+                if (rtv.handle != 0)
+                    device_ptr->destroy_resource_view(rtv);
+            }
+
+            // Destroy proxy resources
             for (auto tex : proxy_textures)
             {
                 if (tex.handle != 0)
@@ -121,6 +140,7 @@ struct SwapchainData
         }
 
         proxy_rtvs.clear();
+        actual_rtvs.clear();
         proxy_textures.clear();
     }
 };
@@ -275,6 +295,7 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
     // Create proxy textures at original resolution
     data->proxy_textures.resize(back_buffer_count);
     data->proxy_rtvs.resize(back_buffer_count);
+    data->actual_rtvs.resize(back_buffer_count);
 
     for (uint32_t i = 0; i < back_buffer_count; ++i)
     {
@@ -309,9 +330,215 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
         }
     }
 
+    // Get actual back buffer RTVs for comparison during bind interception
+    for (uint32_t i = 0; i < back_buffer_count; ++i)
+    {
+        resource back_buffer_resource = swapchain_ptr->get_back_buffer(i);
+
+        // Get the default RTV for the actual back buffer
+        resource_view_desc rtv_desc = {};
+        rtv_desc.type = resource_view_type::texture_2d;
+        rtv_desc.format = actual_desc.texture.format;
+        rtv_desc.texture.first_level = 0;
+        rtv_desc.texture.level_count = 1;
+
+        if (!device_ptr->create_resource_view(back_buffer_resource, resource_usage::render_target, rtv_desc, &data->actual_rtvs[i]))
+        {
+            reshade::log::message(reshade::log::level::error,
+                ("Failed to create actual back buffer RTV " + std::to_string(i)).c_str());
+            data->cleanup();
+            return;
+        }
+    }
+
     reshade::log::message(reshade::log::level::info,
         ("Created " + std::to_string(back_buffer_count) + " proxy textures at " +
         std::to_string(data->original_width) + "x" + std::to_string(data->original_height)).c_str());
+}
+
+static void on_bind_render_targets_and_depth_stencil(command_list* cmd_list, uint32_t count, const resource_view* rtvs, resource_view dsv)
+{
+    if (cmd_list == nullptr || rtvs == nullptr || count == 0)
+        return;
+
+    // Get the device to lookup swapchain data
+    device* device_ptr = cmd_list->get_device();
+    if (device_ptr == nullptr)
+        return;
+
+    std::lock_guard<std::mutex> lock(g_swapchain_mutex);
+
+    // Create a modifiable copy of RTVs
+    std::vector<resource_view> modified_rtvs(rtvs, rtvs + count);
+    bool needs_rebind = false;
+
+    // Check each RTV being bound
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        if (modified_rtvs[i].handle == 0)
+            continue;
+
+        // Search through all swapchains to find if this RTV matches an actual back buffer RTV
+        for (auto& pair : g_swapchain_data)
+        {
+            SwapchainData* data = pair.second;
+            if (!data->override_active)
+                continue;
+
+            // Check if this device matches
+            if (data->device_ptr != device_ptr)
+                continue;
+
+            // Find if this RTV matches any actual back buffer RTV
+            int proxy_index = data->find_proxy_index(modified_rtvs[i]);
+            if (proxy_index >= 0)
+            {
+                // Substitute with proxy RTV
+                modified_rtvs[i] = data->proxy_rtvs[proxy_index];
+                needs_rebind = true;
+
+                reshade::log::message(reshade::log::level::debug,
+                    ("Redirected back buffer RTV to proxy RTV " + std::to_string(proxy_index)).c_str());
+                break; // Found and substituted, move to next RTV
+            }
+        }
+    }
+
+    // If we modified any RTVs, rebind with the proxy RTVs
+    if (needs_rebind)
+    {
+        cmd_list->bind_render_targets_and_depth_stencil(count, modified_rtvs.data(), dsv);
+    }
+}
+
+static void on_bind_viewports(command_list* cmd_list, uint32_t first, uint32_t count, const viewport* viewports)
+{
+    if (cmd_list == nullptr || viewports == nullptr || count == 0)
+        return;
+
+    // Skip if override is disabled
+    if (g_config.force_width == 0 || g_config.force_height == 0)
+        return;
+
+    // Get the device to lookup swapchain data
+    device* device_ptr = cmd_list->get_device();
+    if (device_ptr == nullptr)
+        return;
+
+    std::lock_guard<std::mutex> lock(g_swapchain_mutex);
+
+    // Find if we have an active override for this device
+    SwapchainData* active_data = nullptr;
+    for (auto& pair : g_swapchain_data)
+    {
+        if (pair.second->override_active && pair.second->device_ptr == device_ptr)
+        {
+            active_data = pair.second;
+            break;
+        }
+    }
+
+    if (active_data == nullptr)
+        return; // No active override for this device
+
+    // Calculate scaling factors
+    const float scale_x = static_cast<float>(active_data->original_width) / static_cast<float>(active_data->actual_width);
+    const float scale_y = static_cast<float>(active_data->original_height) / static_cast<float>(active_data->actual_height);
+
+    bool needs_rebind = false;
+
+    // Create a mutable copy
+    std::vector<viewport> modified_viewports(viewports, viewports + count);
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        // Check if viewport dimensions match the forced size (or close to it)
+        // We use a tolerance because viewport might be slightly different
+        const bool matches_forced_width = (modified_viewports[i].width >= active_data->actual_width * 0.9f);
+        const bool matches_forced_height = (modified_viewports[i].height >= active_data->actual_height * 0.9f);
+
+        if (matches_forced_width && matches_forced_height)
+        {
+            // Scale viewport to original size
+            modified_viewports[i].x *= scale_x;
+            modified_viewports[i].y *= scale_y;
+            modified_viewports[i].width *= scale_x;
+            modified_viewports[i].height *= scale_y;
+            needs_rebind = true;
+        }
+    }
+
+    if (needs_rebind)
+    {
+        // Rebind with the modified viewports
+        cmd_list->bind_viewports(first, count, modified_viewports.data());
+    }
+}
+
+static void on_bind_scissor_rects(command_list* cmd_list, uint32_t first, uint32_t count, const rect* rects)
+{
+    if (cmd_list == nullptr || rects == nullptr || count == 0)
+        return;
+
+    // Skip if override is disabled
+    if (g_config.force_width == 0 || g_config.force_height == 0)
+        return;
+
+    // Get the device to lookup swapchain data
+    device* device_ptr = cmd_list->get_device();
+    if (device_ptr == nullptr)
+        return;
+
+    std::lock_guard<std::mutex> lock(g_swapchain_mutex);
+
+    // Find if we have an active override for this device
+    SwapchainData* active_data = nullptr;
+    for (auto& pair : g_swapchain_data)
+    {
+        if (pair.second->override_active && pair.second->device_ptr == device_ptr)
+        {
+            active_data = pair.second;
+            break;
+        }
+    }
+
+    if (active_data == nullptr)
+        return; // No active override for this device
+
+    // Calculate scaling factors
+    const float scale_x = static_cast<float>(active_data->original_width) / static_cast<float>(active_data->actual_width);
+    const float scale_y = static_cast<float>(active_data->original_height) / static_cast<float>(active_data->actual_height);
+
+    bool needs_rebind = false;
+
+    // Create a mutable copy
+    std::vector<rect> modified_rects(rects, rects + count);
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const int32_t width = modified_rects[i].right - modified_rects[i].left;
+        const int32_t height = modified_rects[i].bottom - modified_rects[i].top;
+
+        // Check if scissor rect dimensions match the forced size (or close to it)
+        const bool matches_forced_width = (width >= static_cast<int32_t>(active_data->actual_width * 0.9f));
+        const bool matches_forced_height = (height >= static_cast<int32_t>(active_data->actual_height * 0.9f));
+
+        if (matches_forced_width && matches_forced_height)
+        {
+            // Scale scissor rect to original size
+            modified_rects[i].left = static_cast<int32_t>(modified_rects[i].left * scale_x);
+            modified_rects[i].top = static_cast<int32_t>(modified_rects[i].top * scale_y);
+            modified_rects[i].right = static_cast<int32_t>(modified_rects[i].right * scale_x);
+            modified_rects[i].bottom = static_cast<int32_t>(modified_rects[i].bottom * scale_y);
+            needs_rebind = true;
+        }
+    }
+
+    if (needs_rebind)
+    {
+        // Rebind with the modified scissor rects
+        cmd_list->bind_scissor_rects(first, count, modified_rects.data());
+    }
 }
 
 static void on_present(command_queue* queue, swapchain* swapchain_ptr, const rect*, const rect*, uint32_t, const rect*)
@@ -414,6 +641,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         // Register event callbacks
         reshade::register_event<reshade::addon_event::create_swapchain>(on_create_swapchain);
         reshade::register_event<reshade::addon_event::init_swapchain>(on_init_swapchain);
+        reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(on_bind_render_targets_and_depth_stencil);
+        reshade::register_event<reshade::addon_event::bind_viewports>(on_bind_viewports);
+        reshade::register_event<reshade::addon_event::bind_scissor_rects>(on_bind_scissor_rects);
         reshade::register_event<reshade::addon_event::present>(on_present);
         reshade::register_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
 
@@ -440,6 +670,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         // Unregister event callbacks
         reshade::unregister_event<reshade::addon_event::create_swapchain>(on_create_swapchain);
         reshade::unregister_event<reshade::addon_event::init_swapchain>(on_init_swapchain);
+        reshade::unregister_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(on_bind_render_targets_and_depth_stencil);
+        reshade::unregister_event<reshade::addon_event::bind_viewports>(on_bind_viewports);
+        reshade::unregister_event<reshade::addon_event::bind_scissor_rects>(on_bind_scissor_rects);
         reshade::unregister_event<reshade::addon_event::present>(on_present);
         reshade::unregister_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
 
