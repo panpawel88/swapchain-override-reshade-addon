@@ -250,6 +250,11 @@ static SafetyHookInline g_set_window_pos_hook;
 static SafetyHookInline g_adjust_window_rect_hook;
 static SafetyHookInline g_adjust_window_rect_ex_hook;
 
+// Global state for hook installation tracking
+static bool g_hooks_installed = false;
+static int g_addon_instance_count = 0;
+static std::mutex g_hook_state_mutex;
+
 // Forward declarations of hook functions and helpers
 static void uninstall_window_hooks();
 static HWND WINAPI hooked_CreateWindowExA(DWORD dwExStyle, LPCSTR lpClassName, LPCSTR lpWindowName, DWORD dwStyle, int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam);
@@ -267,8 +272,25 @@ static BOOL WINAPI hooked_AdjustWindowRectEx(LPRECT lpRect, DWORD dwStyle, BOOL 
 // Helper function to install WinAPI hooks
 static bool install_window_hooks()
 {
+    std::lock_guard<std::mutex> lock(g_hook_state_mutex);
+
+    // Increment instance counter
+    g_addon_instance_count++;
+
+    // If hooks are already installed, just return success
+    if (g_hooks_installed)
+    {
+        reshade::log::message(reshade::log::level::info,
+            ("WinAPI hooks already installed (instance count: " + std::to_string(g_addon_instance_count) + ")").c_str());
+        return true;
+    }
+
+    // Only install hooks if borderless mode is enabled
     if (g_config.fullscreen_mode != FullscreenMode::Borderless)
+    {
+        reshade::log::message(reshade::log::level::info, "Borderless mode not enabled, skipping WinAPI hooks");
         return true; // No hooks needed if not in borderless mode
+    }
 
     reshade::log::message(reshade::log::level::info, "Installing WinAPI hooks for borderless fullscreen mode...");
 
@@ -295,13 +317,15 @@ static bool install_window_hooks()
 
     if (all_hooks_valid)
     {
+        g_hooks_installed = true;
         reshade::log::message(reshade::log::level::info, "WinAPI hooks installed successfully");
         return true;
     }
     else
     {
         reshade::log::message(reshade::log::level::error, "Failed to install one or more WinAPI hooks");
-        uninstall_window_hooks();
+        // Note: uninstall_window_hooks() will be called without the lock, so we release it here
+        // by letting this function return, then the caller can handle cleanup
         return false;
     }
 }
@@ -309,6 +333,31 @@ static bool install_window_hooks()
 // Helper function to uninstall WinAPI hooks
 static void uninstall_window_hooks()
 {
+    std::lock_guard<std::mutex> lock(g_hook_state_mutex);
+
+    // Decrement instance counter
+    if (g_addon_instance_count > 0)
+    {
+        g_addon_instance_count--;
+    }
+
+    // Only uninstall hooks when the last instance is destroyed
+    if (g_addon_instance_count > 0)
+    {
+        reshade::log::message(reshade::log::level::info,
+            ("WinAPI hooks still in use (instance count: " + std::to_string(g_addon_instance_count) + ")").c_str());
+        return;
+    }
+
+    // No more instances, uninstall hooks if they were installed
+    if (!g_hooks_installed)
+    {
+        reshade::log::message(reshade::log::level::info, "WinAPI hooks were not installed, nothing to uninstall");
+        return;
+    }
+
+    reshade::log::message(reshade::log::level::info, "Uninstalling WinAPI hooks (last instance destroyed)...");
+
     // SafetyHook uses RAII, just reset the hooks
     g_create_window_ex_a_hook = {};
     g_create_window_ex_w_hook = {};
@@ -321,6 +370,8 @@ static void uninstall_window_hooks()
     g_set_window_pos_hook = {};
     g_adjust_window_rect_hook = {};
     g_adjust_window_rect_ex_hook = {};
+
+    g_hooks_installed = false;
 
     reshade::log::message(reshade::log::level::info, "WinAPI hooks uninstalled");
 }
