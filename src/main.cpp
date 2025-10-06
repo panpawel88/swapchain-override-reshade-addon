@@ -11,6 +11,7 @@
 #include <mutex>
 #include <string>
 #include <Windows.h>
+#include <dxgi.h>
 #include <safetyhook.hpp>
 #include "shader_bytecode.h"
 
@@ -630,17 +631,14 @@ static bool on_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd
     // Handle fullscreen mode override
     if (g_config.fullscreen_mode == FullscreenMode::Exclusive)
     {
-        if (!desc.fullscreen_state)
-        {
-            reshade::log::message(reshade::log::level::info, "Forcing exclusive fullscreen mode");
-            desc.fullscreen_state = true;
-            modified = true;
-        }
+        // Don't force fullscreen during creation (causes DXGI_ERROR_INVALID_CALL due to 0/0 refresh rate)
+        // Instead, we'll transition to fullscreen after creation in on_init_swapchain
 
-        // Enable mode switching for exclusive fullscreen (DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH = 0x20)
-        constexpr uint32_t DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH = 0x20;
+        // Enable mode switching flag to allow fullscreen transition later (DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH = 0x2)
+        constexpr uint32_t DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH = 0x2;
         if ((desc.present_flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH) == 0)
         {
+            reshade::log::message(reshade::log::level::info, "Enabling mode switching for exclusive fullscreen transition");
             desc.present_flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
             modified = true;
         }
@@ -655,7 +653,7 @@ static bool on_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd
         }
 
         // Remove mode switching flag for borderless (we want windowed mode)
-        constexpr uint32_t DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH = 0x20;
+        constexpr uint32_t DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH = 0x2;
         if ((desc.present_flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH) != 0)
         {
             desc.present_flags &= ~DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
@@ -862,6 +860,39 @@ static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
     reshade::log::message(reshade::log::level::info,
         ("Created " + std::to_string(back_buffer_count) + " proxy textures at " +
         std::to_string(data->original_width) + "x" + std::to_string(data->original_height)).c_str());
+
+    // Transition to exclusive fullscreen if configured (only on initial creation, not resize)
+    if (!is_resize && g_config.fullscreen_mode == FullscreenMode::Exclusive)
+    {
+        const device_api api = device_ptr->get_api();
+
+        // Only apply to DXGI-based APIs (D3D10, D3D11, D3D12)
+        if (api == device_api::d3d10 || api == device_api::d3d11 || api == device_api::d3d12)
+        {
+            // Get native DXGI swapchain handle
+            IDXGISwapChain* dxgi_swapchain = reinterpret_cast<IDXGISwapChain*>(swapchain_ptr->get_native());
+            if (dxgi_swapchain != nullptr)
+            {
+                // Transition to exclusive fullscreen
+                HRESULT hr = dxgi_swapchain->SetFullscreenState(TRUE, nullptr);
+                if (SUCCEEDED(hr))
+                {
+                    reshade::log::message(reshade::log::level::info, "Successfully transitioned to exclusive fullscreen mode");
+                }
+                else
+                {
+                    reshade::log::message(reshade::log::level::error,
+                        ("Failed to transition to exclusive fullscreen (HRESULT: 0x" +
+                        std::to_string(static_cast<unsigned long>(hr)) + ")").c_str());
+                }
+            }
+        }
+        else
+        {
+            reshade::log::message(reshade::log::level::warning,
+                "Exclusive fullscreen mode is only supported for D3D10/D3D11/D3D12 APIs");
+        }
+    }
 }
 
 static void on_bind_render_targets_and_depth_stencil(command_list* cmd_list, uint32_t count, const resource_view* rtvs, resource_view dsv)
@@ -1164,28 +1195,48 @@ static bool on_set_fullscreen_state(swapchain* swapchain_ptr, bool fullscreen, v
     if (swapchain_ptr == nullptr)
         return false;
 
-    // If block_fullscreen_changes is enabled, prevent any fullscreen state changes
+    // If exclusive mode is forced:
+    // - Allow transitions TO fullscreen (including our own internal transition)
+    // - Block transitions to windowed
+    if (g_config.fullscreen_mode == FullscreenMode::Exclusive)
+    {
+        if (!fullscreen)
+        {
+            reshade::log::message(reshade::log::level::debug,
+                "Blocking windowed transition to maintain exclusive fullscreen mode");
+            return true; // Block the change to windowed
+        }
+        else
+        {
+            // Allow transition to fullscreen (this is what we want)
+            return false;
+        }
+    }
+
+    // If borderless mode is forced:
+    // - Allow transitions to windowed
+    // - Block transitions to fullscreen
+    if (g_config.fullscreen_mode == FullscreenMode::Borderless)
+    {
+        if (fullscreen)
+        {
+            reshade::log::message(reshade::log::level::debug,
+                "Blocking fullscreen transition to maintain borderless fullscreen mode");
+            return true; // Block the change to exclusive fullscreen
+        }
+        else
+        {
+            // Allow transition to windowed (this is what we want)
+            return false;
+        }
+    }
+
+    // FullscreenMode::Unchanged - respect block_fullscreen_changes setting
     if (g_config.block_fullscreen_changes)
     {
         reshade::log::message(reshade::log::level::debug,
             ("Blocked fullscreen state change attempt (requested: " + std::string(fullscreen ? "fullscreen" : "windowed") + ")").c_str());
         return true; // Return true to block the change
-    }
-
-    // If exclusive mode is forced, always override to fullscreen
-    if (g_config.fullscreen_mode == FullscreenMode::Exclusive && !fullscreen)
-    {
-        reshade::log::message(reshade::log::level::debug,
-            "Overriding fullscreen state change to maintain exclusive fullscreen mode");
-        return true; // Block the change to windowed
-    }
-
-    // If borderless mode is forced, always override to windowed
-    if (g_config.fullscreen_mode == FullscreenMode::Borderless && fullscreen)
-    {
-        reshade::log::message(reshade::log::level::debug,
-            "Blocking fullscreen state change to maintain borderless fullscreen mode");
-        return true; // Block the change to exclusive fullscreen
     }
 
     return false; // Allow the change
