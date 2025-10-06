@@ -5,6 +5,8 @@
 
 A ReShade addon that forces a specific swapchain resolution while maintaining application compatibility through proxy textures. This allows you to run games at higher resolutions than they natively support.
 
+> **⚠️ Development Status:** This project is still under active development and not fully functional. Some features may not work as expected or may cause issues with certain games. Use at your own risk.
+
 ## Use Cases
 
 - **Legacy Games** - Run older games that don't support modern high resolutions (4K, 8K)
