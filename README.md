@@ -9,6 +9,8 @@ A ReShade addon that forces a specific swapchain resolution while maintaining ap
 
 - **Legacy Games** - Run older games that don't support modern high resolutions (4K, 8K)
 - **Resolution Unlocking** - Force games with hardcoded resolution limits to render at higher resolutions
+- **Fullscreen Mode Control** - Force borderless or exclusive fullscreen regardless of game settings
+- **Multi-Monitor Gaming** - Force borderless fullscreen on a specific monitor
 - **Upscaling Testing** - Test how games look at different resolutions without native support
 - **Screenshot Enhancement** - Capture high-resolution screenshots from games with limited resolution options
 - **Supersampling** - Force higher internal rendering resolution for improved image quality
@@ -16,9 +18,11 @@ A ReShade addon that forces a specific swapchain resolution while maintaining ap
 ## Features
 
 - **Forced Resolution Override** - Override swapchain resolution to any configured size (default 4K)
+- **Fullscreen Mode Override** - Force exclusive fullscreen or borderless fullscreen mode
+- **Multi-Monitor Support** - Configure which monitor to use for borderless fullscreen
 - **Application Compatibility** - Uses proxy textures so applications render unaware of resolution changes
 - **Automatic Scaling** - Scales proxy textures to actual swapchain on present
-- **Configurable Settings** - Customize resolution and scaling filter via ReShade.ini
+- **Configurable Settings** - Customize resolution, fullscreen mode, and scaling filter via ReShade.ini
 - **Thread-Safe** - Proper mutex protection for concurrent operations
 - **Clean Resource Management** - Automatic cleanup of proxy textures and render targets
 - **Automated CI/CD** - GitHub Actions for builds and releases
@@ -92,11 +96,19 @@ Add these settings to your `ReShade.ini` file under the `[APP]` section:
 
 ```ini
 [APP]
+# Resolution Override
 ForceSwapchainResolution=3840x2160
 SwapchainScalingFilter=1
+
+# Fullscreen Mode Override
+FullscreenMode=0
+BlockFullscreenChanges=0
+TargetMonitor=0
 ```
 
 ### Configuration Options
+
+#### Resolution Override
 
 **ForceSwapchainResolution**
 - Format: `<width>x<height>`
@@ -115,6 +127,36 @@ SwapchainScalingFilter=1
   - `0` - Point sampling (nearest neighbor, sharp but pixelated)
   - `1` - Linear filtering (smooth scaling, recommended)
   - `2` - Anisotropic filtering (highest quality for textures)
+
+#### Fullscreen Mode Override
+
+**FullscreenMode**
+- Type: Integer (0-2)
+- Default: `0` (Unchanged)
+- Values:
+  - `0` - Unchanged (no fullscreen mode override, default behavior)
+  - `1` - Borderless (force borderless fullscreen / windowed fullscreen)
+  - `2` - Exclusive (force exclusive fullscreen)
+- **Note:** Borderless mode uses WinAPI hooks and may conflict with anti-cheat systems or other overlays
+
+**BlockFullscreenChanges**
+- Type: Boolean (0 or 1)
+- Default: `0` (Disabled)
+- Values:
+  - `0` - Allow application to change fullscreen state at runtime
+  - `1` - Block all fullscreen state changes (prevents Alt+Enter toggles)
+- **Use case:** Prevent games from changing fullscreen mode when you want to maintain a specific mode
+
+**TargetMonitor**
+- Type: Integer (0+)
+- Default: `0` (Primary monitor)
+- Values:
+  - `0` - Primary monitor
+  - `1` - First secondary monitor
+  - `2` - Second secondary monitor
+  - etc.
+- **Note:** Only applies when `FullscreenMode=1` (Borderless). Falls back to primary if specified monitor doesn't exist
+- **Monitor order:** Monitors are enumerated left-to-right as they appear in Windows display settings
 
 ## Project Structure
 
@@ -200,6 +242,19 @@ MIT License - Feel free to use this template for your own addons.
 - Check ReShade logs for addon loading status and any error messages
 - The `.addon` file extension is required for ReShade to recognize and load the module
 
+### Fullscreen Mode Override Limitations
+
+- **Borderless fullscreen mode uses WinAPI hooks** which may:
+  - Conflict with anti-cheat systems (may be detected as suspicious)
+  - Conflict with other overlays or recording software
+  - Not work with games using non-standard window creation
+- **Borderless fullscreen typically has**:
+  - Slightly higher input latency than exclusive fullscreen
+  - DWM composition overhead (unavoidable on Windows 10+)
+  - Better compatibility with overlays and Alt+Tab
+- **Exclusive fullscreen** provides best performance but less compatibility with overlays
+- Monitor enumeration order may vary between systems for multi-monitor setups
+
 ## Troubleshooting
 
 **Game crashes or fails to start:**
@@ -220,3 +275,14 @@ MIT License - Feel free to use this template for your own addons.
 - Verify `ReShade.ini` is in the correct location and properly formatted
 - Check that the configuration is under the `[APP]` section
 - Restart the application after changing configuration
+
+**Fullscreen mode not working:**
+- For borderless mode: Check ReShade logs for WinAPI hook installation messages
+- Some games with custom window management may resist borderless modifications
+- Anti-cheat systems may block WinAPI hooks - try exclusive mode instead
+- Ensure `FullscreenMode` is set to `1` (borderless) or `2` (exclusive), not `0`
+
+**Game crashes when using borderless mode:**
+- Try exclusive fullscreen mode (`FullscreenMode=2`) instead
+- Disable the fullscreen override (`FullscreenMode=0`) and use only resolution override
+- Check for conflicts with other overlays or recording software

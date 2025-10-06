@@ -10,6 +10,8 @@
 #include <cstdlib>
 #include <mutex>
 #include <string>
+#include <Windows.h>
+#include <safetyhook.hpp>
 #include "shader_bytecode.h"
 
 using namespace reshade::api;
@@ -18,11 +20,21 @@ using namespace reshade::api;
 // Configuration
 // ============================================================================
 
+enum class FullscreenMode
+{
+    Unchanged = 0,   // Don't modify fullscreen behavior (default)
+    Borderless = 1,  // Force borderless fullscreen (windowed)
+    Exclusive = 2    // Force exclusive fullscreen
+};
+
 struct SwapchainConfig
 {
     uint32_t force_width = 0;
     uint32_t force_height = 0;
     filter_mode scaling_filter = filter_mode::min_mag_mip_linear;
+    FullscreenMode fullscreen_mode = FullscreenMode::Unchanged;
+    bool block_fullscreen_changes = false;
+    int target_monitor = 0; // 0 = primary, 1+ = secondary monitors
 };
 
 static SwapchainConfig g_config;
@@ -77,6 +89,44 @@ static void load_config()
     else
     {
         reshade::set_config_value(nullptr, "APP", "SwapchainScalingFilter", 1);
+    }
+
+    // Read fullscreen mode
+    int fullscreen_mode_value = 0; // Default to Unchanged
+    if (reshade::get_config_value(nullptr, "APP", "FullscreenMode", fullscreen_mode_value))
+    {
+        switch (fullscreen_mode_value)
+        {
+        case 0:
+            g_config.fullscreen_mode = FullscreenMode::Unchanged;
+            break;
+        case 1:
+            g_config.fullscreen_mode = FullscreenMode::Borderless;
+            break;
+        case 2:
+            g_config.fullscreen_mode = FullscreenMode::Exclusive;
+            break;
+        default:
+            g_config.fullscreen_mode = FullscreenMode::Unchanged;
+            break;
+        }
+    }
+    else
+    {
+        reshade::set_config_value(nullptr, "APP", "FullscreenMode", 0);
+    }
+
+    // Read block fullscreen changes
+    if (!reshade::get_config_value(nullptr, "APP", "BlockFullscreenChanges", g_config.block_fullscreen_changes))
+    {
+        reshade::set_config_value(nullptr, "APP", "BlockFullscreenChanges", false);
+    }
+
+    // Read target monitor
+    if (!reshade::get_config_value(nullptr, "APP", "TargetMonitor", g_config.target_monitor))
+    {
+        reshade::set_config_value(nullptr, "APP", "TargetMonitor", 0);
+        g_config.target_monitor = 0;
     }
 }
 
@@ -184,45 +234,385 @@ static std::unordered_map<WindowHandle, PendingSwapchainInfo> g_pending_swapchai
 static std::mutex g_pending_mutex;
 
 // ============================================================================
+// WinAPI Hooks for Borderless Fullscreen
+// ============================================================================
+
+// SafetyHook inline hook objects
+static SafetyHookInline g_create_window_ex_a_hook;
+static SafetyHookInline g_create_window_ex_w_hook;
+static SafetyHookInline g_set_window_long_a_hook;
+static SafetyHookInline g_set_window_long_w_hook;
+#ifdef _WIN64
+static SafetyHookInline g_set_window_long_ptr_a_hook;
+static SafetyHookInline g_set_window_long_ptr_w_hook;
+#endif
+static SafetyHookInline g_set_window_pos_hook;
+static SafetyHookInline g_adjust_window_rect_hook;
+static SafetyHookInline g_adjust_window_rect_ex_hook;
+
+// Forward declarations of hook functions and helpers
+static void uninstall_window_hooks();
+static HWND WINAPI hooked_CreateWindowExA(DWORD dwExStyle, LPCSTR lpClassName, LPCSTR lpWindowName, DWORD dwStyle, int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam);
+static HWND WINAPI hooked_CreateWindowExW(DWORD dwExStyle, LPCWSTR lpClassName, LPCWSTR lpWindowName, DWORD dwStyle, int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam);
+static LONG WINAPI hooked_SetWindowLongA(HWND hWnd, int nIndex, LONG dwNewLong);
+static LONG WINAPI hooked_SetWindowLongW(HWND hWnd, int nIndex, LONG dwNewLong);
+#ifdef _WIN64
+static LONG_PTR WINAPI hooked_SetWindowLongPtrA(HWND hWnd, int nIndex, LONG_PTR dwNewLong);
+static LONG_PTR WINAPI hooked_SetWindowLongPtrW(HWND hWnd, int nIndex, LONG_PTR dwNewLong);
+#endif
+static BOOL WINAPI hooked_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags);
+static BOOL WINAPI hooked_AdjustWindowRect(LPRECT lpRect, DWORD dwStyle, BOOL bMenu);
+static BOOL WINAPI hooked_AdjustWindowRectEx(LPRECT lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle);
+
+// Helper function to install WinAPI hooks
+static bool install_window_hooks()
+{
+    if (g_config.fullscreen_mode != FullscreenMode::Borderless)
+        return true; // No hooks needed if not in borderless mode
+
+    reshade::log::message(reshade::log::level::info, "Installing WinAPI hooks for borderless fullscreen mode...");
+
+    g_create_window_ex_a_hook = safetyhook::create_inline(reinterpret_cast<void*>(CreateWindowExA), reinterpret_cast<void*>(hooked_CreateWindowExA));
+    g_create_window_ex_w_hook = safetyhook::create_inline(reinterpret_cast<void*>(CreateWindowExW), reinterpret_cast<void*>(hooked_CreateWindowExW));
+    g_set_window_long_a_hook = safetyhook::create_inline(reinterpret_cast<void*>(SetWindowLongA), reinterpret_cast<void*>(hooked_SetWindowLongA));
+    g_set_window_long_w_hook = safetyhook::create_inline(reinterpret_cast<void*>(SetWindowLongW), reinterpret_cast<void*>(hooked_SetWindowLongW));
+#ifdef _WIN64
+    g_set_window_long_ptr_a_hook = safetyhook::create_inline(reinterpret_cast<void*>(SetWindowLongPtrA), reinterpret_cast<void*>(hooked_SetWindowLongPtrA));
+    g_set_window_long_ptr_w_hook = safetyhook::create_inline(reinterpret_cast<void*>(SetWindowLongPtrW), reinterpret_cast<void*>(hooked_SetWindowLongPtrW));
+#endif
+    g_set_window_pos_hook = safetyhook::create_inline(reinterpret_cast<void*>(SetWindowPos), reinterpret_cast<void*>(hooked_SetWindowPos));
+    g_adjust_window_rect_hook = safetyhook::create_inline(reinterpret_cast<void*>(AdjustWindowRect), reinterpret_cast<void*>(hooked_AdjustWindowRect));
+    g_adjust_window_rect_ex_hook = safetyhook::create_inline(reinterpret_cast<void*>(AdjustWindowRectEx), reinterpret_cast<void*>(hooked_AdjustWindowRectEx));
+
+    bool all_hooks_valid = g_create_window_ex_a_hook && g_create_window_ex_w_hook &&
+                           g_set_window_long_a_hook && g_set_window_long_w_hook &&
+                           g_set_window_pos_hook &&
+                           g_adjust_window_rect_hook && g_adjust_window_rect_ex_hook;
+
+#ifdef _WIN64
+    all_hooks_valid = all_hooks_valid && g_set_window_long_ptr_a_hook && g_set_window_long_ptr_w_hook;
+#endif
+
+    if (all_hooks_valid)
+    {
+        reshade::log::message(reshade::log::level::info, "WinAPI hooks installed successfully");
+        return true;
+    }
+    else
+    {
+        reshade::log::message(reshade::log::level::error, "Failed to install one or more WinAPI hooks");
+        uninstall_window_hooks();
+        return false;
+    }
+}
+
+// Helper function to uninstall WinAPI hooks
+static void uninstall_window_hooks()
+{
+    // SafetyHook uses RAII, just reset the hooks
+    g_create_window_ex_a_hook = {};
+    g_create_window_ex_w_hook = {};
+    g_set_window_long_a_hook = {};
+    g_set_window_long_w_hook = {};
+#ifdef _WIN64
+    g_set_window_long_ptr_a_hook = {};
+    g_set_window_long_ptr_w_hook = {};
+#endif
+    g_set_window_pos_hook = {};
+    g_adjust_window_rect_hook = {};
+    g_adjust_window_rect_ex_hook = {};
+
+    reshade::log::message(reshade::log::level::info, "WinAPI hooks uninstalled");
+}
+
+// Helper structure for monitor enumeration
+struct MonitorEnumData
+{
+    int target_index;
+    int current_index;
+    HMONITOR found_monitor;
+};
+
+// Callback for EnumDisplayMonitors
+static BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
+{
+    auto* data = reinterpret_cast<MonitorEnumData*>(dwData);
+    if (data->current_index == data->target_index)
+    {
+        data->found_monitor = hMonitor;
+        return FALSE; // Stop enumeration
+    }
+    data->current_index++;
+    return TRUE; // Continue enumeration
+}
+
+// Helper function to get target monitor info for borderless fullscreen
+static bool get_target_monitor_rect(RECT* out_rect)
+{
+    HMONITOR target_monitor = nullptr;
+
+    if (g_config.target_monitor == 0)
+    {
+        // Use primary monitor
+        target_monitor = MonitorFromPoint({ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+    }
+    else
+    {
+        // Enumerate monitors to find the Nth one
+        MonitorEnumData data = {};
+        data.target_index = g_config.target_monitor;
+        data.current_index = 0;
+        data.found_monitor = nullptr;
+
+        EnumDisplayMonitors(nullptr, nullptr, MonitorEnumProc, reinterpret_cast<LPARAM>(&data));
+
+        if (data.found_monitor != nullptr)
+        {
+            target_monitor = data.found_monitor;
+        }
+        else
+        {
+            // Fall back to primary if target monitor not found
+            reshade::log::message(reshade::log::level::warning,
+                ("Target monitor " + std::to_string(g_config.target_monitor) + " not found, using primary monitor").c_str());
+            target_monitor = MonitorFromPoint({ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+        }
+    }
+
+    if (target_monitor != nullptr)
+    {
+        MONITORINFO mi = { sizeof(MONITORINFO) };
+        if (GetMonitorInfo(target_monitor, &mi))
+        {
+            *out_rect = mi.rcMonitor;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Hook implementations
+static HWND WINAPI hooked_CreateWindowExA(DWORD dwExStyle, LPCSTR lpClassName, LPCSTR lpWindowName, DWORD dwStyle, int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam)
+{
+    if (g_config.fullscreen_mode == FullscreenMode::Borderless)
+    {
+        // Modify to borderless fullscreen
+        dwStyle = (dwStyle & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+        dwExStyle = dwExStyle & ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME);
+
+        // Get target monitor dimensions
+        RECT monitor_rect;
+        if (get_target_monitor_rect(&monitor_rect))
+        {
+            X = monitor_rect.left;
+            Y = monitor_rect.top;
+            nWidth = monitor_rect.right - monitor_rect.left;
+            nHeight = monitor_rect.bottom - monitor_rect.top;
+
+            reshade::log::message(reshade::log::level::debug,
+                ("CreateWindowExA: Forcing borderless fullscreen " + std::to_string(nWidth) + "x" + std::to_string(nHeight)).c_str());
+        }
+    }
+
+    return g_create_window_ex_a_hook.call<HWND>(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y, nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam);
+}
+
+static HWND WINAPI hooked_CreateWindowExW(DWORD dwExStyle, LPCWSTR lpClassName, LPCWSTR lpWindowName, DWORD dwStyle, int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam)
+{
+    if (g_config.fullscreen_mode == FullscreenMode::Borderless)
+    {
+        // Modify to borderless fullscreen
+        dwStyle = (dwStyle & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+        dwExStyle = dwExStyle & ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME);
+
+        // Get target monitor dimensions
+        RECT monitor_rect;
+        if (get_target_monitor_rect(&monitor_rect))
+        {
+            X = monitor_rect.left;
+            Y = monitor_rect.top;
+            nWidth = monitor_rect.right - monitor_rect.left;
+            nHeight = monitor_rect.bottom - monitor_rect.top;
+
+            reshade::log::message(reshade::log::level::debug,
+                ("CreateWindowExW: Forcing borderless fullscreen " + std::to_string(nWidth) + "x" + std::to_string(nHeight)).c_str());
+        }
+    }
+
+    return g_create_window_ex_w_hook.call<HWND>(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y, nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam);
+}
+
+static LONG WINAPI hooked_SetWindowLongA(HWND hWnd, int nIndex, LONG dwNewLong)
+{
+    if (g_config.fullscreen_mode == FullscreenMode::Borderless && nIndex == GWL_STYLE)
+    {
+        // Force popup style, remove borders
+        dwNewLong = (dwNewLong & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+    }
+
+    return g_set_window_long_a_hook.call<LONG>(hWnd, nIndex, dwNewLong);
+}
+
+static LONG WINAPI hooked_SetWindowLongW(HWND hWnd, int nIndex, LONG dwNewLong)
+{
+    if (g_config.fullscreen_mode == FullscreenMode::Borderless && nIndex == GWL_STYLE)
+    {
+        // Force popup style, remove borders
+        dwNewLong = (dwNewLong & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+    }
+
+    return g_set_window_long_w_hook.call<LONG>(hWnd, nIndex, dwNewLong);
+}
+
+#ifdef _WIN64
+static LONG_PTR WINAPI hooked_SetWindowLongPtrA(HWND hWnd, int nIndex, LONG_PTR dwNewLong)
+{
+    if (g_config.fullscreen_mode == FullscreenMode::Borderless && nIndex == GWL_STYLE)
+    {
+        // Force popup style, remove borders
+        dwNewLong = (dwNewLong & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+    }
+
+    return g_set_window_long_ptr_a_hook.call<LONG_PTR>(hWnd, nIndex, dwNewLong);
+}
+
+static LONG_PTR WINAPI hooked_SetWindowLongPtrW(HWND hWnd, int nIndex, LONG_PTR dwNewLong)
+{
+    if (g_config.fullscreen_mode == FullscreenMode::Borderless && nIndex == GWL_STYLE)
+    {
+        // Force popup style, remove borders
+        dwNewLong = (dwNewLong & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+    }
+
+    return g_set_window_long_ptr_w_hook.call<LONG_PTR>(hWnd, nIndex, dwNewLong);
+}
+#endif
+
+static BOOL WINAPI hooked_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags)
+{
+    if (g_config.fullscreen_mode == FullscreenMode::Borderless)
+    {
+        // Don't modify if both SWP_NOSIZE and SWP_NOMOVE are set
+        if ((uFlags & SWP_NOSIZE) && (uFlags & SWP_NOMOVE))
+        {
+            return g_set_window_pos_hook.call<BOOL>(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
+        }
+
+        // Get target monitor dimensions
+        RECT monitor_rect;
+        if (get_target_monitor_rect(&monitor_rect))
+        {
+            X = monitor_rect.left;
+            Y = monitor_rect.top;
+            cx = monitor_rect.right - monitor_rect.left;
+            cy = monitor_rect.bottom - monitor_rect.top;
+
+            // Remove flags that would prevent our changes
+            uFlags &= ~(SWP_NOMOVE | SWP_NOSIZE);
+        }
+    }
+
+    return g_set_window_pos_hook.call<BOOL>(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
+}
+
+static BOOL WINAPI hooked_AdjustWindowRect(LPRECT lpRect, DWORD dwStyle, BOOL bMenu)
+{
+    if (g_config.fullscreen_mode == FullscreenMode::Borderless)
+    {
+        // Return the rect unchanged (pretend no window decoration)
+        return TRUE;
+    }
+
+    return g_adjust_window_rect_hook.call<BOOL>(lpRect, dwStyle, bMenu);
+}
+
+static BOOL WINAPI hooked_AdjustWindowRectEx(LPRECT lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle)
+{
+    if (g_config.fullscreen_mode == FullscreenMode::Borderless)
+    {
+        // Return the rect unchanged (pretend no window decoration)
+        return TRUE;
+    }
+
+    return g_adjust_window_rect_ex_hook.call<BOOL>(lpRect, dwStyle, bMenu, dwExStyle);
+}
+
+// ============================================================================
 // Event Callbacks
 // ============================================================================
 
 static bool on_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd)
 {
-    // If override is disabled (0,0), don't modify
-    if (g_config.force_width == 0 || g_config.force_height == 0)
-        return false;
+    bool modified = false;
 
-    // Check if the requested size differs from our desired size
-    const uint32_t requested_width = desc.back_buffer.texture.width;
-    const uint32_t requested_height = desc.back_buffer.texture.height;
-
-    if (requested_width == g_config.force_width && requested_height == g_config.force_height)
+    // Handle resolution override
+    if (g_config.force_width != 0 && g_config.force_height != 0)
     {
-        // Sizes match, no override needed
-        return false;
+        const uint32_t requested_width = desc.back_buffer.texture.width;
+        const uint32_t requested_height = desc.back_buffer.texture.height;
+
+        if (requested_width != g_config.force_width || requested_height != g_config.force_height)
+        {
+            // Store the original requested size in pending map (keyed by window handle)
+            if (hwnd != nullptr)
+            {
+                std::lock_guard<std::mutex> lock(g_pending_mutex);
+                PendingSwapchainInfo info;
+                info.original_width = requested_width;
+                info.original_height = requested_height;
+                g_pending_swapchains[static_cast<WindowHandle>(hwnd)] = info;
+            }
+
+            // Override the swapchain description
+            desc.back_buffer.texture.width = g_config.force_width;
+            desc.back_buffer.texture.height = g_config.force_height;
+
+            reshade::log::message(reshade::log::level::info,
+                ("Swapchain override: Requested size " + std::to_string(requested_width) + "x" + std::to_string(requested_height) +
+                " -> Forced size " + std::to_string(g_config.force_width) + "x" + std::to_string(g_config.force_height)).c_str());
+
+            modified = true;
+        }
     }
 
-    // Store the original requested size in pending map (keyed by window handle)
-    // We'll retrieve this in init_swapchain
-    if (hwnd != nullptr)
+    // Handle fullscreen mode override
+    if (g_config.fullscreen_mode == FullscreenMode::Exclusive)
     {
-        std::lock_guard<std::mutex> lock(g_pending_mutex);
-        PendingSwapchainInfo info;
-        info.original_width = requested_width;
-        info.original_height = requested_height;
-        g_pending_swapchains[static_cast<WindowHandle>(hwnd)] = info;
+        if (!desc.fullscreen_state)
+        {
+            reshade::log::message(reshade::log::level::info, "Forcing exclusive fullscreen mode");
+            desc.fullscreen_state = true;
+            modified = true;
+        }
+
+        // Enable mode switching for exclusive fullscreen (DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH = 0x20)
+        constexpr uint32_t DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH = 0x20;
+        if ((desc.present_flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH) == 0)
+        {
+            desc.present_flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+            modified = true;
+        }
+    }
+    else if (g_config.fullscreen_mode == FullscreenMode::Borderless)
+    {
+        if (desc.fullscreen_state)
+        {
+            reshade::log::message(reshade::log::level::info, "Forcing borderless fullscreen mode (windowed)");
+            desc.fullscreen_state = false;
+            modified = true;
+        }
+
+        // Remove mode switching flag for borderless (we want windowed mode)
+        constexpr uint32_t DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH = 0x20;
+        if ((desc.present_flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH) != 0)
+        {
+            desc.present_flags &= ~DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+            modified = true;
+        }
     }
 
-    // Override the swapchain description
-    desc.back_buffer.texture.width = g_config.force_width;
-    desc.back_buffer.texture.height = g_config.force_height;
-
-    reshade::log::message(reshade::log::level::info,
-        ("Swapchain override: Requested size " + std::to_string(requested_width) + "x" + std::to_string(requested_height) +
-        " -> Forced size " + std::to_string(g_config.force_width) + "x" + std::to_string(g_config.force_height)).c_str());
-
-    return true; // Indicate we modified the description
+    return modified;
 }
 
 static void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
@@ -718,6 +1108,38 @@ static void on_present(command_queue* queue, swapchain* swapchain_ptr, const rec
     device_ptr->destroy_resource_view(actual_rtv);
 }
 
+static bool on_set_fullscreen_state(swapchain* swapchain_ptr, bool fullscreen, void* hmonitor)
+{
+    if (swapchain_ptr == nullptr)
+        return false;
+
+    // If block_fullscreen_changes is enabled, prevent any fullscreen state changes
+    if (g_config.block_fullscreen_changes)
+    {
+        reshade::log::message(reshade::log::level::debug,
+            ("Blocked fullscreen state change attempt (requested: " + std::string(fullscreen ? "fullscreen" : "windowed") + ")").c_str());
+        return true; // Return true to block the change
+    }
+
+    // If exclusive mode is forced, always override to fullscreen
+    if (g_config.fullscreen_mode == FullscreenMode::Exclusive && !fullscreen)
+    {
+        reshade::log::message(reshade::log::level::debug,
+            "Overriding fullscreen state change to maintain exclusive fullscreen mode");
+        return true; // Block the change to windowed
+    }
+
+    // If borderless mode is forced, always override to windowed
+    if (g_config.fullscreen_mode == FullscreenMode::Borderless && fullscreen)
+    {
+        reshade::log::message(reshade::log::level::debug,
+            "Blocking fullscreen state change to maintain borderless fullscreen mode");
+        return true; // Block the change to exclusive fullscreen
+    }
+
+    return false; // Allow the change
+}
+
 static void on_destroy_swapchain(swapchain* swapchain_ptr, bool is_resize)
 {
     if (swapchain_ptr == nullptr || is_resize)
@@ -753,6 +1175,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         // Load configuration
         load_config();
 
+        // Install WinAPI hooks if borderless fullscreen mode is enabled
+        install_window_hooks();
+
         // Register event callbacks
         reshade::register_event<reshade::addon_event::create_swapchain>(on_create_swapchain);
         reshade::register_event<reshade::addon_event::init_swapchain>(on_init_swapchain);
@@ -760,12 +1185,16 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         reshade::register_event<reshade::addon_event::bind_viewports>(on_bind_viewports);
         reshade::register_event<reshade::addon_event::bind_scissor_rects>(on_bind_scissor_rects);
         reshade::register_event<reshade::addon_event::present>(on_present);
+        reshade::register_event<reshade::addon_event::set_fullscreen_state>(on_set_fullscreen_state);
         reshade::register_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
 
         reshade::log::message(reshade::log::level::info, "Swapchain Override addon loaded");
         break;
 
     case DLL_PROCESS_DETACH:
+        // Uninstall WinAPI hooks
+        uninstall_window_hooks();
+
         // Clean up all swapchain data
         {
             std::lock_guard<std::mutex> lock(g_swapchain_mutex);
@@ -789,6 +1218,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         reshade::unregister_event<reshade::addon_event::bind_viewports>(on_bind_viewports);
         reshade::unregister_event<reshade::addon_event::bind_scissor_rects>(on_bind_scissor_rects);
         reshade::unregister_event<reshade::addon_event::present>(on_present);
+        reshade::unregister_event<reshade::addon_event::set_fullscreen_state>(on_set_fullscreen_state);
         reshade::unregister_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
 
         // Unregister the addon

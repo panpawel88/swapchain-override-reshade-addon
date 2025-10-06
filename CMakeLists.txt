@@ -10,6 +10,23 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/reshade/include/reshade.hpp")
     message(FATAL_ERROR "ReShade submodule not found. Run: git submodule update --init --recursive")
 endif()
 
+# Use FetchContent for SafetyHook (it will automatically fetch Zydis as a dependency)
+include(FetchContent)
+
+message(STATUS "Fetching SafetyHook...")
+FetchContent_Declare(safetyhook
+    GIT_REPOSITORY "https://github.com/cursey/safetyhook"
+    GIT_TAG "main"
+)
+
+# Configure SafetyHook options before making it available
+set(SAFETYHOOK_FETCH_ZYDIS ON)
+set(SAFETYHOOK_BUILD_DOCS OFF)
+set(SAFETYHOOK_BUILD_TEST OFF)
+set(SAFETYHOOK_BUILD_EXAMPLES OFF)
+
+FetchContent_MakeAvailable(safetyhook)
+
 # Find fxc.exe for shader compilation
 find_program(FXC_EXECUTABLE fxc
     PATHS
@@ -97,6 +114,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/external/reshade/include
     ${CMAKE_BINARY_DIR}/generated
 )
+
+# Link SafetyHook
+target_link_libraries(${PROJECT_NAME} PRIVATE safetyhook)
 
 # Compiler-specific flags
 if(MSVC)
