@@ -8,7 +8,7 @@
 #include "config.h"
 #include "window_hooks.h"
 #include "swapchain_manager.h"
-#include "event_handlers.h"
+#include "reshade_callbacks.h"
 
 // ============================================================================
 // DLL Entry Point

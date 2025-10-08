@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "event_handlers.h"
+#include "reshade_callbacks.h"
 #include "config.h"
 #include "swapchain_manager.h"
 
