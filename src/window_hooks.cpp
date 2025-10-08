@@ -28,7 +28,7 @@ bool WindowHooks::install()
     }
 
     // Only install hooks if borderless mode is enabled
-    if (Config::get_instance().get_fullscreen_mode() != FullscreenMode::Borderless)
+    if (!Config::get_instance().is_borderless_fullscreen_enabled())
     {
         reshade::log::message(reshade::log::level::info, "Borderless mode not enabled, skipping WinAPI hooks");
         return true; // No hooks needed if not in borderless mode
@@ -177,7 +177,7 @@ HWND WINAPI WindowHooks::hooked_CreateWindowExA(DWORD dwExStyle, LPCSTR lpClassN
 {
     auto& hooks = WindowHooks::get_instance();
 
-    if (Config::get_instance().get_fullscreen_mode() == FullscreenMode::Borderless)
+    if (Config::get_instance().is_borderless_fullscreen_enabled())
     {
         // Modify to borderless fullscreen
         dwStyle = (dwStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE;
@@ -204,7 +204,7 @@ HWND WINAPI WindowHooks::hooked_CreateWindowExW(DWORD dwExStyle, LPCWSTR lpClass
 {
     auto& hooks = WindowHooks::get_instance();
 
-    if (Config::get_instance().get_fullscreen_mode() == FullscreenMode::Borderless)
+    if (Config::get_instance().is_borderless_fullscreen_enabled())
     {
         // Modify to borderless fullscreen
         dwStyle = (dwStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE;
@@ -231,7 +231,7 @@ LONG WINAPI WindowHooks::hooked_SetWindowLongA(HWND hWnd, int nIndex, LONG dwNew
 {
     auto& hooks = WindowHooks::get_instance();
 
-    if (Config::get_instance().get_fullscreen_mode() == FullscreenMode::Borderless && nIndex == GWL_STYLE)
+    if (Config::get_instance().is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
     {
         // Force popup style, remove borders (cast to unsigned for bit operations)
         dwNewLong = static_cast<LONG>((static_cast<DWORD>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
@@ -244,7 +244,7 @@ LONG WINAPI WindowHooks::hooked_SetWindowLongW(HWND hWnd, int nIndex, LONG dwNew
 {
     auto& hooks = WindowHooks::get_instance();
 
-    if (Config::get_instance().get_fullscreen_mode() == FullscreenMode::Borderless && nIndex == GWL_STYLE)
+    if (Config::get_instance().is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
     {
         // Force popup style, remove borders (cast to unsigned for bit operations)
         dwNewLong = static_cast<LONG>((static_cast<DWORD>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
@@ -258,7 +258,7 @@ LONG_PTR WINAPI WindowHooks::hooked_SetWindowLongPtrA(HWND hWnd, int nIndex, LON
 {
     auto& hooks = WindowHooks::get_instance();
 
-    if (Config::get_instance().get_fullscreen_mode() == FullscreenMode::Borderless && nIndex == GWL_STYLE)
+    if (Config::get_instance().is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
     {
         // Force popup style, remove borders (cast to unsigned for bit operations)
         dwNewLong = static_cast<LONG_PTR>((static_cast<ULONG_PTR>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
@@ -271,7 +271,7 @@ LONG_PTR WINAPI WindowHooks::hooked_SetWindowLongPtrW(HWND hWnd, int nIndex, LON
 {
     auto& hooks = WindowHooks::get_instance();
 
-    if (Config::get_instance().get_fullscreen_mode() == FullscreenMode::Borderless && nIndex == GWL_STYLE)
+    if (Config::get_instance().is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
     {
         // Force popup style, remove borders (cast to unsigned for bit operations)
         dwNewLong = static_cast<LONG_PTR>((static_cast<ULONG_PTR>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
@@ -285,7 +285,7 @@ BOOL WINAPI WindowHooks::hooked_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, in
 {
     auto& hooks = WindowHooks::get_instance();
 
-    if (Config::get_instance().get_fullscreen_mode() == FullscreenMode::Borderless)
+    if (Config::get_instance().is_borderless_fullscreen_enabled())
     {
         // Don't modify if both SWP_NOSIZE and SWP_NOMOVE are set
         if ((uFlags & SWP_NOSIZE) && (uFlags & SWP_NOMOVE))
@@ -314,7 +314,7 @@ BOOL WINAPI WindowHooks::hooked_AdjustWindowRect(LPRECT lpRect, DWORD dwStyle, B
 {
     auto& hooks = WindowHooks::get_instance();
 
-    if (Config::get_instance().get_fullscreen_mode() == FullscreenMode::Borderless)
+    if (Config::get_instance().is_borderless_fullscreen_enabled())
     {
         // Return the rect unchanged (pretend no window decoration)
         return TRUE;
@@ -327,7 +327,7 @@ BOOL WINAPI WindowHooks::hooked_AdjustWindowRectEx(LPRECT lpRect, DWORD dwStyle,
 {
     auto& hooks = WindowHooks::get_instance();
 
-    if (Config::get_instance().get_fullscreen_mode() == FullscreenMode::Borderless)
+    if (Config::get_instance().is_borderless_fullscreen_enabled())
     {
         // Return the rect unchanged (pretend no window decoration)
         return TRUE;

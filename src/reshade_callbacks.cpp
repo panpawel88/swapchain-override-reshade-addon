@@ -16,7 +16,7 @@ bool on_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd)
     bool modified = false;
 
     // Handle resolution override
-    if (config.is_override_enabled())
+    if (config.is_resolution_override_enabled())
     {
         const uint32_t requested_width = desc.back_buffer.texture.width;
         const uint32_t requested_height = desc.back_buffer.texture.height;
@@ -45,7 +45,7 @@ bool on_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd)
     }
 
     // Handle fullscreen mode override
-    if (config.get_fullscreen_mode() == FullscreenMode::Exclusive)
+    if (config.is_exclusive_fullscreen_enabled())
     {
         // Don't force fullscreen during creation (causes DXGI_ERROR_INVALID_CALL due to 0/0 refresh rate)
         // Instead, we'll transition to fullscreen after creation in on_init_swapchain
@@ -59,7 +59,7 @@ bool on_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd)
             modified = true;
         }
     }
-    else if (config.get_fullscreen_mode() == FullscreenMode::Borderless)
+    else if (config.is_borderless_fullscreen_enabled())
     {
         if (desc.fullscreen_state)
         {
@@ -87,7 +87,7 @@ void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
 
     // Skip if override is disabled
     const Config& config = Config::get_instance();
-    if (!config.is_override_enabled())
+    if (!config.is_resolution_override_enabled())
         return;
 
     // Check if we have pending data for this swapchain's window
@@ -103,7 +103,7 @@ void on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
     SwapchainManager::get_instance().initialize_swapchain(swapchain_ptr);
 
     // Transition to exclusive fullscreen if configured (only on initial creation, not resize)
-    if (!is_resize && config.get_fullscreen_mode() == FullscreenMode::Exclusive)
+    if (!is_resize && config.is_exclusive_fullscreen_enabled())
     {
         device* device_ptr = swapchain_ptr->get_device();
         if (device_ptr == nullptr)
@@ -200,7 +200,7 @@ void on_bind_viewports(command_list* cmd_list, uint32_t first, uint32_t count, c
 
     // Skip if override is disabled
     const Config& config = Config::get_instance();
-    if (!config.is_override_enabled())
+    if (!config.is_resolution_override_enabled())
         return;
 
     // Get the device to lookup swapchain data
@@ -257,7 +257,7 @@ void on_bind_scissor_rects(command_list* cmd_list, uint32_t first, uint32_t coun
 
     // Skip if override is disabled
     const Config& config = Config::get_instance();
-    if (!config.is_override_enabled())
+    if (!config.is_resolution_override_enabled())
         return;
 
     // Get the device to lookup swapchain data
@@ -423,7 +423,7 @@ bool on_set_fullscreen_state(swapchain* swapchain_ptr, bool fullscreen, void* hm
     // If exclusive mode is forced:
     // - Allow transitions TO fullscreen (including our own internal transition)
     // - Block transitions to windowed
-    if (config.get_fullscreen_mode() == FullscreenMode::Exclusive)
+    if (config.is_exclusive_fullscreen_enabled())
     {
         if (!fullscreen)
         {
@@ -441,7 +441,7 @@ bool on_set_fullscreen_state(swapchain* swapchain_ptr, bool fullscreen, void* hm
     // If borderless mode is forced:
     // - Allow transitions to windowed
     // - Block transitions to fullscreen
-    if (config.get_fullscreen_mode() == FullscreenMode::Borderless)
+    if (config.is_borderless_fullscreen_enabled())
     {
         if (fullscreen)
         {

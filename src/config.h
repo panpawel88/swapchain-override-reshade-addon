@@ -33,7 +33,10 @@ public:
     int get_target_monitor() const { return target_monitor_; }
 
     // Convenience methods
-    bool is_override_enabled() const { return force_width_ != 0 && force_height_ != 0; }
+    bool is_resolution_override_enabled() const { return force_width_ != 0 && force_height_ != 0; }
+    bool is_exclusive_fullscreen_enabled() const { return fullscreen_mode_ == FullscreenMode::Exclusive; }
+    bool is_borderless_fullscreen_enabled() const { return fullscreen_mode_ == FullscreenMode::Borderless; }
+    bool is_fullscreen_mode_overridden() const { return fullscreen_mode_ != FullscreenMode::Unchanged; }
 
 private:
     Config() = default;
