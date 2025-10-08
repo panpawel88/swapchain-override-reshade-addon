@@ -65,8 +65,18 @@ public:
     // Cleanup
     void cleanup_all();
 
-    // Mutex accessors (needed by event handlers)
-    std::mutex& get_swapchain_mutex() { return swapchain_mutex_; }
+    // High-level event handlers (encapsulate callback logic with internal locking)
+    bool handle_create_swapchain(reshade::api::device_api api, reshade::api::swapchain_desc& desc, void* hwnd);
+    void handle_init_swapchain(reshade::api::swapchain* swapchain_ptr, bool is_resize);
+    void handle_bind_render_targets(reshade::api::command_list* cmd_list, uint32_t count,
+                                     const reshade::api::resource_view* rtvs, reshade::api::resource_view dsv);
+    void handle_bind_viewports(reshade::api::command_list* cmd_list, uint32_t first, uint32_t count,
+                               const reshade::api::viewport* viewports);
+    void handle_bind_scissor_rects(reshade::api::command_list* cmd_list, uint32_t first, uint32_t count,
+                                    const reshade::api::rect* rects);
+    void handle_present(reshade::api::command_queue* queue, reshade::api::swapchain* swapchain_ptr);
+    bool handle_set_fullscreen_state(reshade::api::swapchain* swapchain_ptr, bool fullscreen, void* hmonitor);
+    void handle_destroy_swapchain(reshade::api::swapchain* swapchain_ptr, bool is_resize);
 
 private:
     SwapchainManager() = default;
