@@ -128,14 +128,15 @@ bool SwapchainManager::initialize_swapchain(swapchain* swapchain_ptr)
     if (it != swapchain_data_.end())
     {
         // Clean up existing resources on resize
-        data = it->second;
+        data = it->second.get();
         data->cleanup();
     }
     else
     {
         // Create new swapchain data
-        data = new SwapchainData();
-        swapchain_data_[swapchain_handle] = data;
+        auto unique_data = std::make_unique<SwapchainData>();
+        data = unique_data.get();
+        swapchain_data_[swapchain_handle] = std::move(unique_data);
     }
 
     data->device_ptr = device_ptr;
@@ -303,7 +304,6 @@ void SwapchainManager::destroy_swapchain(SwapchainNativeHandle swapchain_handle)
     auto it = swapchain_data_.find(swapchain_handle);
     if (it != swapchain_data_.end())
     {
-        delete it->second;
         swapchain_data_.erase(it);
         reshade::log::message(reshade::log::level::info, "Cleaned up swapchain override data");
     }
@@ -314,7 +314,7 @@ SwapchainData* SwapchainManager::get_data(SwapchainNativeHandle swapchain_handle
     // Note: Caller must hold swapchain_mutex_
     auto it = swapchain_data_.find(swapchain_handle);
     if (it != swapchain_data_.end())
-        return it->second;
+        return it->second.get();
     return nullptr;
 }
 
@@ -325,7 +325,7 @@ SwapchainData* SwapchainManager::find_active_data_for_device(device* device_ptr)
     {
         if (pair.second->override_active && pair.second->device_ptr == device_ptr)
         {
-            return pair.second;
+            return pair.second.get();
         }
     }
     return nullptr;
@@ -334,10 +334,6 @@ SwapchainData* SwapchainManager::find_active_data_for_device(device* device_ptr)
 void SwapchainManager::cleanup_all()
 {
     std::lock_guard<std::mutex> lock(swapchain_mutex_);
-    for (auto& pair : swapchain_data_)
-    {
-        delete pair.second;
-    }
     swapchain_data_.clear();
 
     std::lock_guard<std::mutex> pending_lock(pending_mutex_);

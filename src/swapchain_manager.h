@@ -93,7 +93,7 @@ private:
     bool create_copy_pipeline(SwapchainData* data, reshade::api::format format);
 
     // Data storage
-    std::unordered_map<SwapchainNativeHandle, SwapchainData*> swapchain_data_;
+    std::unordered_map<SwapchainNativeHandle, std::unique_ptr<SwapchainData>> swapchain_data_;
     std::mutex swapchain_mutex_;
 
     std::unordered_map<WindowHandle, PendingSwapchainInfo> pending_swapchains_;
