@@ -37,64 +37,11 @@ struct SwapchainData
     reshade::api::device* device_ptr = nullptr;
 
     // Helper: Find proxy RTV index from actual back buffer resource
-    int find_proxy_index(reshade::api::resource actual_resource) const
-    {
-        for (size_t i = 0; i < actual_back_buffers.size(); ++i)
-        {
-            if (actual_back_buffers[i].handle == actual_resource.handle)
-                return static_cast<int>(i);
-        }
-        return -1;
-    }
+    int find_proxy_index(reshade::api::resource actual_resource) const;
 
-    ~SwapchainData()
-    {
-        cleanup();
-    }
+    ~SwapchainData();
 
-    void cleanup()
-    {
-        if (device_ptr != nullptr)
-        {
-            // Destroy pipeline objects
-            if (copy_pipeline.handle != 0)
-                device_ptr->destroy_pipeline(copy_pipeline);
-            if (copy_pipeline_layout.handle != 0)
-                device_ptr->destroy_pipeline_layout(copy_pipeline_layout);
-            if (copy_sampler.handle != 0)
-                device_ptr->destroy_sampler(copy_sampler);
-
-            // Destroy proxy resource views
-            for (auto rtv : proxy_rtvs)
-            {
-                if (rtv.handle != 0)
-                    device_ptr->destroy_resource_view(rtv);
-            }
-
-            // Destroy proxy SRVs
-            for (auto srv : proxy_srvs)
-            {
-                if (srv.handle != 0)
-                    device_ptr->destroy_resource_view(srv);
-            }
-
-            // Destroy proxy resources
-            for (auto tex : proxy_textures)
-            {
-                if (tex.handle != 0)
-                    device_ptr->destroy_resource(tex);
-            }
-        }
-
-        copy_pipeline = {};
-        copy_pipeline_layout = {};
-        copy_sampler = {};
-
-        proxy_rtvs.clear();
-        proxy_srvs.clear();
-        proxy_textures.clear();
-        actual_back_buffers.clear();
-    }
+    void cleanup();
 };
 
 class SwapchainManager
