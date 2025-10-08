@@ -94,10 +94,10 @@ The addon will automatically be loaded by ReShade and override the swapchain res
 
 ## Configuration
 
-Add these settings to your `ReShade.ini` file under the `[APP]` section:
+Add these settings to your `ReShade.ini` file under the `[SWAPCHAIN_OVERRIDE]` section:
 
 ```ini
-[APP]
+[SWAPCHAIN_OVERRIDE]
 # Resolution Override
 ForceSwapchainResolution=3840x2160
 SwapchainScalingFilter=1
@@ -275,7 +275,7 @@ MIT License - Feel free to use this template for your own addons.
 
 **Resolution not changing:**
 - Verify `ReShade.ini` is in the correct location and properly formatted
-- Check that the configuration is under the `[APP]` section
+- Check that the configuration is under the `[SWAPCHAIN_OVERRIDE]` section
 - Restart the application after changing configuration
 
 **Fullscreen mode not working:**

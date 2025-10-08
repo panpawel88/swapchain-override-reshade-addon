@@ -105,7 +105,7 @@ The build will fail if `external/reshade/include/reshade.hpp` is missing.
 
 ## Configuration System
 
-Configuration read from `ReShade.ini` in the `[APP]` section:
+Configuration read from `ReShade.ini` in the `[SWAPCHAIN_OVERRIDE]` section:
 
 ### Resolution Override
 
