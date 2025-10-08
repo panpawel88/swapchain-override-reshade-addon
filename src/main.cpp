@@ -450,7 +450,7 @@ static HWND WINAPI hooked_CreateWindowExA(DWORD dwExStyle, LPCSTR lpClassName, L
     if (g_config.fullscreen_mode == FullscreenMode::Borderless)
     {
         // Modify to borderless fullscreen
-        dwStyle = (dwStyle & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+        dwStyle = (dwStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE;
         dwExStyle = dwExStyle & ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME);
 
         // Get target monitor dimensions
@@ -475,7 +475,7 @@ static HWND WINAPI hooked_CreateWindowExW(DWORD dwExStyle, LPCWSTR lpClassName, 
     if (g_config.fullscreen_mode == FullscreenMode::Borderless)
     {
         // Modify to borderless fullscreen
-        dwStyle = (dwStyle & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+        dwStyle = (dwStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE;
         dwExStyle = dwExStyle & ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME);
 
         // Get target monitor dimensions
@@ -499,8 +499,8 @@ static LONG WINAPI hooked_SetWindowLongA(HWND hWnd, int nIndex, LONG dwNewLong)
 {
     if (g_config.fullscreen_mode == FullscreenMode::Borderless && nIndex == GWL_STYLE)
     {
-        // Force popup style, remove borders
-        dwNewLong = (dwNewLong & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+        // Force popup style, remove borders (cast to unsigned for bit operations)
+        dwNewLong = static_cast<LONG>((static_cast<DWORD>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
     }
 
     return g_set_window_long_a_hook.call<LONG>(hWnd, nIndex, dwNewLong);
@@ -510,8 +510,8 @@ static LONG WINAPI hooked_SetWindowLongW(HWND hWnd, int nIndex, LONG dwNewLong)
 {
     if (g_config.fullscreen_mode == FullscreenMode::Borderless && nIndex == GWL_STYLE)
     {
-        // Force popup style, remove borders
-        dwNewLong = (dwNewLong & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+        // Force popup style, remove borders (cast to unsigned for bit operations)
+        dwNewLong = static_cast<LONG>((static_cast<DWORD>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
     }
 
     return g_set_window_long_w_hook.call<LONG>(hWnd, nIndex, dwNewLong);
@@ -522,8 +522,8 @@ static LONG_PTR WINAPI hooked_SetWindowLongPtrA(HWND hWnd, int nIndex, LONG_PTR 
 {
     if (g_config.fullscreen_mode == FullscreenMode::Borderless && nIndex == GWL_STYLE)
     {
-        // Force popup style, remove borders
-        dwNewLong = (dwNewLong & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+        // Force popup style, remove borders (cast to unsigned for bit operations)
+        dwNewLong = static_cast<LONG_PTR>((static_cast<ULONG_PTR>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
     }
 
     return g_set_window_long_ptr_a_hook.call<LONG_PTR>(hWnd, nIndex, dwNewLong);
@@ -533,8 +533,8 @@ static LONG_PTR WINAPI hooked_SetWindowLongPtrW(HWND hWnd, int nIndex, LONG_PTR 
 {
     if (g_config.fullscreen_mode == FullscreenMode::Borderless && nIndex == GWL_STYLE)
     {
-        // Force popup style, remove borders
-        dwNewLong = (dwNewLong & ~(WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
+        // Force popup style, remove borders (cast to unsigned for bit operations)
+        dwNewLong = static_cast<LONG_PTR>((static_cast<ULONG_PTR>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
     }
 
     return g_set_window_long_ptr_w_hook.call<LONG_PTR>(hWnd, nIndex, dwNewLong);
