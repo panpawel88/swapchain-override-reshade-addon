@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
 project(swapchain_override_addon VERSION 1.0.0 LANGUAGES CXX)
 
 # Allow normal variables to override options (needed for FetchContent dependencies)
@@ -13,32 +13,19 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/reshade/include/reshade.hpp")
     message(FATAL_ERROR "ReShade submodule not found. Run: git submodule update --init --recursive")
 endif()
 
-# Use FetchContent for SafetyHook and its dependencies
+# Use FetchContent for SafetyHook (it will automatically fetch Zydis as a dependency)
 include(FetchContent)
 
-# Note: We pre-fetch Zydis before SafetyHook to work around a dependency resolution
-# issue with Visual Studio generator. While SafetyHook can fetch Zydis automatically,
-# the include paths aren't properly configured before SafetyHook compilation starts.
-# Pre-fetching ensures Zydis is fully available as a target.
+# Configure SafetyHook to fetch Zydis and disable unnecessary builds
+set(SAFETYHOOK_FETCH_ZYDIS ON)
+set(SAFETYHOOK_BUILD_DOCS OFF)
+set(SAFETYHOOK_BUILD_TEST OFF)
+set(SAFETYHOOK_BUILD_EXAMPLES OFF)
 
-# Configure Zydis options (use CACHE FORCE to override option() commands)
-set(ZYDIS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(ZYDIS_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-set(ZYDIS_BUILD_DOXYGEN OFF CACHE BOOL "" FORCE)
-
-message(STATUS "Fetching Zydis...")
-FetchContent_Declare(Zydis
-    GIT_REPOSITORY "https://github.com/zyantific/zydis.git"
-    GIT_TAG "v4.1.0"
-    GIT_SHALLOW ON
-)
-FetchContent_MakeAvailable(Zydis)
-
-# Configure SafetyHook options (use CACHE FORCE to override option() commands)
-set(SAFETYHOOK_FETCH_ZYDIS ON CACHE BOOL "" FORCE)  # Let it "fetch" (will use existing)
-set(SAFETYHOOK_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(SAFETYHOOK_BUILD_TEST OFF CACHE BOOL "" FORCE)
-set(SAFETYHOOK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+# Configure Zydis options (applied when SafetyHook fetches it)
+set(ZYDIS_BUILD_EXAMPLES OFF)
+set(ZYDIS_BUILD_TOOLS OFF)
+set(ZYDIS_BUILD_DOXYGEN OFF)
 
 message(STATUS "Fetching SafetyHook...")
 FetchContent_Declare(safetyhook
