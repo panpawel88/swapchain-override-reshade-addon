@@ -10,20 +10,35 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/reshade/include/reshade.hpp")
     message(FATAL_ERROR "ReShade submodule not found. Run: git submodule update --init --recursive")
 endif()
 
-# Use FetchContent for SafetyHook (it will automatically fetch Zydis as a dependency)
+# Use FetchContent for SafetyHook (it will fetch Zydis as a dependency)
 include(FetchContent)
 
+# Set Zydis options before SafetyHook fetches it
+set(ZYDIS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ZYDIS_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(ZYDIS_BUILD_DOXYGEN OFF CACHE BOOL "" FORCE)
+
+# Configure SafetyHook options
+set(SAFETYHOOK_FETCH_ZYDIS ON CACHE BOOL "" FORCE)
+set(SAFETYHOOK_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(SAFETYHOOK_BUILD_TEST OFF CACHE BOOL "" FORCE)
+set(SAFETYHOOK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
+# Pre-fetch Zydis to ensure it's available
+message(STATUS "Fetching Zydis...")
+FetchContent_Declare(Zydis
+    GIT_REPOSITORY "https://github.com/zyantific/zydis.git"
+    GIT_TAG "v4.1.0"
+    GIT_SHALLOW ON
+)
+FetchContent_MakeAvailable(Zydis)
+
+# Now fetch SafetyHook (it will use the already-fetched Zydis)
 message(STATUS "Fetching SafetyHook...")
 FetchContent_Declare(safetyhook
     GIT_REPOSITORY "https://github.com/cursey/safetyhook"
     GIT_TAG "main"
 )
-
-# Configure SafetyHook options before making it available
-set(SAFETYHOOK_FETCH_ZYDIS ON)
-set(SAFETYHOOK_BUILD_DOCS OFF)
-set(SAFETYHOOK_BUILD_TEST OFF)
-set(SAFETYHOOK_BUILD_EXAMPLES OFF)
 
 FetchContent_MakeAvailable(safetyhook)
 
