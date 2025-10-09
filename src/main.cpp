@@ -8,7 +8,6 @@
 #include "config.h"
 #include "window_hooks.h"
 #include "swapchain_manager.h"
-#include "reshade_callbacks.h"
 
 // ============================================================================
 // DLL Entry Point
@@ -30,14 +29,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         WindowHooks::get_instance().install();
 
         // Register event callbacks
-        reshade::register_event<reshade::addon_event::create_swapchain>(on_create_swapchain);
-        reshade::register_event<reshade::addon_event::init_swapchain>(on_init_swapchain);
-        reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(on_bind_render_targets_and_depth_stencil);
-        reshade::register_event<reshade::addon_event::bind_viewports>(on_bind_viewports);
-        reshade::register_event<reshade::addon_event::bind_scissor_rects>(on_bind_scissor_rects);
-        reshade::register_event<reshade::addon_event::present>(on_present);
-        reshade::register_event<reshade::addon_event::set_fullscreen_state>(on_set_fullscreen_state);
-        reshade::register_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
+        SwapchainManager::get_instance().install();
 
         reshade::log::message(reshade::log::level::info, "Swapchain Override addon loaded");
         break;
@@ -50,14 +42,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         SwapchainManager::get_instance().cleanup_all();
 
         // Unregister event callbacks
-        reshade::unregister_event<reshade::addon_event::create_swapchain>(on_create_swapchain);
-        reshade::unregister_event<reshade::addon_event::init_swapchain>(on_init_swapchain);
-        reshade::unregister_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(on_bind_render_targets_and_depth_stencil);
-        reshade::unregister_event<reshade::addon_event::bind_viewports>(on_bind_viewports);
-        reshade::unregister_event<reshade::addon_event::bind_scissor_rects>(on_bind_scissor_rects);
-        reshade::unregister_event<reshade::addon_event::present>(on_present);
-        reshade::unregister_event<reshade::addon_event::set_fullscreen_state>(on_set_fullscreen_state);
-        reshade::unregister_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
+        SwapchainManager::get_instance().uninstall();
 
         // Unregister the addon
         reshade::unregister_addon(hModule);

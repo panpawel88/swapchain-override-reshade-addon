@@ -804,3 +804,73 @@ void SwapchainManager::handle_destroy_swapchain(swapchain* swapchain_ptr, bool i
     const SwapchainNativeHandle swapchain_handle = swapchain_ptr->get_native();
     destroy_swapchain(swapchain_handle);
 }
+
+// Install/uninstall methods
+void SwapchainManager::install()
+{
+    reshade::register_event<reshade::addon_event::create_swapchain>(on_create_swapchain);
+    reshade::register_event<reshade::addon_event::init_swapchain>(on_init_swapchain);
+    reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(on_bind_render_targets_and_depth_stencil);
+    reshade::register_event<reshade::addon_event::bind_viewports>(on_bind_viewports);
+    reshade::register_event<reshade::addon_event::bind_scissor_rects>(on_bind_scissor_rects);
+    reshade::register_event<reshade::addon_event::present>(on_present);
+    reshade::register_event<reshade::addon_event::set_fullscreen_state>(on_set_fullscreen_state);
+    reshade::register_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
+}
+
+void SwapchainManager::uninstall()
+{
+    reshade::unregister_event<reshade::addon_event::create_swapchain>(on_create_swapchain);
+    reshade::unregister_event<reshade::addon_event::init_swapchain>(on_init_swapchain);
+    reshade::unregister_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(on_bind_render_targets_and_depth_stencil);
+    reshade::unregister_event<reshade::addon_event::bind_viewports>(on_bind_viewports);
+    reshade::unregister_event<reshade::addon_event::bind_scissor_rects>(on_bind_scissor_rects);
+    reshade::unregister_event<reshade::addon_event::present>(on_present);
+    reshade::unregister_event<reshade::addon_event::set_fullscreen_state>(on_set_fullscreen_state);
+    reshade::unregister_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
+}
+
+// Static callback wrappers
+bool SwapchainManager::on_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd)
+{
+    return get_instance().handle_create_swapchain(api, desc, hwnd);
+}
+
+void SwapchainManager::on_init_swapchain(swapchain* swapchain_ptr, bool is_resize)
+{
+    get_instance().handle_init_swapchain(swapchain_ptr, is_resize);
+}
+
+void SwapchainManager::on_bind_render_targets_and_depth_stencil(command_list* cmd_list, uint32_t count,
+                                                                  const resource_view* rtvs, resource_view dsv)
+{
+    get_instance().handle_bind_render_targets(cmd_list, count, rtvs, dsv);
+}
+
+void SwapchainManager::on_bind_viewports(command_list* cmd_list, uint32_t first, uint32_t count,
+                                          const viewport* viewports)
+{
+    get_instance().handle_bind_viewports(cmd_list, first, count, viewports);
+}
+
+void SwapchainManager::on_bind_scissor_rects(command_list* cmd_list, uint32_t first, uint32_t count,
+                                               const rect* rects)
+{
+    get_instance().handle_bind_scissor_rects(cmd_list, first, count, rects);
+}
+
+void SwapchainManager::on_present(command_queue* queue, swapchain* swapchain_ptr,
+                                   const rect*, const rect*, uint32_t, const rect*)
+{
+    get_instance().handle_present(queue, swapchain_ptr);
+}
+
+bool SwapchainManager::on_set_fullscreen_state(swapchain* swapchain_ptr, bool fullscreen, void* hmonitor)
+{
+    return get_instance().handle_set_fullscreen_state(swapchain_ptr, fullscreen, hmonitor);
+}
+
+void SwapchainManager::on_destroy_swapchain(swapchain* swapchain_ptr, bool is_resize)
+{
+    get_instance().handle_destroy_swapchain(swapchain_ptr, is_resize);
+}

@@ -50,6 +50,10 @@ public:
     // Singleton access
     static SwapchainManager& get_instance();
 
+    // Install/uninstall ReShade event callbacks
+    void install();
+    void uninstall();
+
     // Pending swapchain info management
     void store_pending_info(WindowHandle hwnd, uint32_t width, uint32_t height);
     bool retrieve_pending_info(WindowHandle hwnd, uint32_t& out_width, uint32_t& out_height);
@@ -91,6 +95,21 @@ private:
     // Helper methods
     bool create_proxy_resources(SwapchainData* data, reshade::api::swapchain* swapchain_ptr);
     bool create_copy_pipeline(SwapchainData* data, reshade::api::format format);
+
+    // ReShade event callback implementations (static wrappers)
+    static bool on_create_swapchain(reshade::api::device_api api, reshade::api::swapchain_desc& desc, void* hwnd);
+    static void on_init_swapchain(reshade::api::swapchain* swapchain_ptr, bool is_resize);
+    static void on_bind_render_targets_and_depth_stencil(reshade::api::command_list* cmd_list, uint32_t count,
+                                                          const reshade::api::resource_view* rtvs, reshade::api::resource_view dsv);
+    static void on_bind_viewports(reshade::api::command_list* cmd_list, uint32_t first, uint32_t count,
+                                   const reshade::api::viewport* viewports);
+    static void on_bind_scissor_rects(reshade::api::command_list* cmd_list, uint32_t first, uint32_t count,
+                                       const reshade::api::rect* rects);
+    static void on_present(reshade::api::command_queue* queue, reshade::api::swapchain* swapchain_ptr,
+                           const reshade::api::rect* source_rect, const reshade::api::rect* dest_rect,
+                           uint32_t dirty_rect_count, const reshade::api::rect* dirty_rects);
+    static bool on_set_fullscreen_state(reshade::api::swapchain* swapchain_ptr, bool fullscreen, void* hmonitor);
+    static void on_destroy_swapchain(reshade::api::swapchain* swapchain_ptr, bool is_resize);
 
     // Data storage
     std::unordered_map<SwapchainNativeHandle, std::unique_ptr<SwapchainData>> swapchain_data_;
