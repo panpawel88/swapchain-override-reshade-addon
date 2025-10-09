@@ -148,11 +148,23 @@ bool SwapchainManager::initialize_swapchain(swapchain* swapchain_ptr)
     WindowHandle hwnd = swapchain_ptr->get_hwnd();
     if (!retrieve_pending_info(hwnd, data->original_width, data->original_height))
     {
-        // Fallback if we couldn't retrieve original size (shouldn't happen in normal flow)
+        // Fallback: use actual swapchain dimensions (shouldn't happen in normal flow)
+        data->original_width = actual_desc.texture.width;
+        data->original_height = actual_desc.texture.height;
         reshade::log::message(reshade::log::level::warning,
-            "Could not retrieve original swapchain dimensions, using 1920x1080 as fallback");
-        data->original_width = 1920;
-        data->original_height = 1080;
+            ("Could not retrieve original swapchain dimensions, using actual dimensions as fallback: " +
+            std::to_string(data->original_width) + "x" + std::to_string(data->original_height)).c_str());
+    }
+
+    // Skip proxy system if no scaling is needed
+    if (data->original_width == data->actual_width && data->original_height == data->actual_height)
+    {
+        data->override_active = false;
+        reshade::log::message(reshade::log::level::info,
+            ("Swapchain dimensions match (no scaling needed): " +
+            std::to_string(data->original_width) + "x" + std::to_string(data->original_height) +
+            " - skipping proxy texture creation").c_str());
+        return true;
     }
 
     // Create proxy resources
@@ -623,17 +635,18 @@ bool SwapchainManager::handle_create_swapchain(device_api api, swapchain_desc& d
         const uint32_t requested_width = desc.back_buffer.texture.width;
         const uint32_t requested_height = desc.back_buffer.texture.height;
 
+        // Always store the original requested size when override is enabled
+        if (hwnd != nullptr)
+        {
+            store_pending_info(
+                static_cast<WindowHandle>(hwnd),
+                requested_width,
+                requested_height);
+        }
+
+        // Only modify descriptor if sizes differ
         if (requested_width != config.get_force_width() || requested_height != config.get_force_height())
         {
-            // Store the original requested size in pending map (keyed by window handle)
-            if (hwnd != nullptr)
-            {
-                store_pending_info(
-                    static_cast<WindowHandle>(hwnd),
-                    requested_width,
-                    requested_height);
-            }
-
             // Override the swapchain description
             desc.back_buffer.texture.width = config.get_force_width();
             desc.back_buffer.texture.height = config.get_force_height();
