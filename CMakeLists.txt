@@ -119,6 +119,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/external/reshade/include
+    ${CMAKE_SOURCE_DIR}/external/reshade/deps/imgui
     ${CMAKE_BINARY_DIR}/generated
 )
 

@@ -4,10 +4,16 @@
  * SPDX-License-Identifier: MIT
  */
 
+// Include imgui.h BEFORE common.h to ensure IMGUI_VERSION_NUM is defined
+// when reshade::register_addon() initializes the ImGui function table
+#define ImTextureID ImU64
+#include <imgui.h>
+
 #include "common.h"
 #include "config.h"
 #include "window_hooks.h"
 #include "swapchain_manager.h"
+#include "overlay.h"
 
 // ============================================================================
 // DLL Entry Point
@@ -31,10 +37,16 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         // Register event callbacks
         SwapchainManager::get_instance().install();
 
+        // Register debug overlay
+        OverlayManager::get_instance().install();
+
         reshade::log::message(reshade::log::level::info, "Swapchain Override addon loaded");
         break;
 
     case DLL_PROCESS_DETACH:
+        // Unregister debug overlay
+        OverlayManager::get_instance().uninstall();
+
         // Uninstall WinAPI hooks
         WindowHooks::get_instance().uninstall();
 

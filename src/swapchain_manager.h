@@ -57,6 +57,20 @@ public:
     // Cleanup
     void cleanup_all();
 
+    // Query methods for overlay/debugging (public, thread-safe)
+    template<typename Func>
+    void for_each_swapchain(Func callback) const
+    {
+        std::lock_guard<std::mutex> lock(swapchain_mutex_);
+        for (const auto& [handle, data] : swapchain_data_)
+        {
+            if (data != nullptr)
+            {
+                callback(handle, *data);
+            }
+        }
+    }
+
 private:
     SwapchainManager() = default;
     ~SwapchainManager() = default;
@@ -113,8 +127,8 @@ private:
 
     // Data storage
     std::unordered_map<SwapchainNativeHandle, std::unique_ptr<SwapchainData>> swapchain_data_;
-    std::mutex swapchain_mutex_;
+    mutable std::mutex swapchain_mutex_;
 
     std::unordered_map<WindowHandle, PendingSwapchainInfo> pending_swapchains_;
-    std::mutex pending_mutex_;
+    mutable std::mutex pending_mutex_;
 };

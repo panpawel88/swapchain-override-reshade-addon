@@ -28,4 +28,5 @@ using WindowHandle = void*;              // Window handle (HWND, etc.)
 class Config;
 class WindowHooks;
 class SwapchainManager;
+class OverlayManager;
 struct SwapchainData;
