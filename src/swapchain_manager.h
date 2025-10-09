@@ -54,22 +54,32 @@ public:
     void install();
     void uninstall();
 
-    // Pending swapchain info management
-    void store_pending_info(WindowHandle hwnd, uint32_t width, uint32_t height);
-    bool retrieve_pending_info(WindowHandle hwnd, uint32_t& out_width, uint32_t& out_height);
-
-    // Swapchain resource management
-    bool initialize_swapchain(reshade::api::swapchain* swapchain_ptr);
-    void destroy_swapchain(SwapchainNativeHandle swapchain_handle);
-
-    // Query methods
-    SwapchainData* get_data(SwapchainNativeHandle swapchain_handle);
-    SwapchainData* find_active_data_for_device(reshade::api::device* device_ptr);
-
     // Cleanup
     void cleanup_all();
 
-    // High-level event handlers (encapsulate callback logic with internal locking)
+private:
+    SwapchainManager() = default;
+    ~SwapchainManager() = default;
+
+    // Delete copy/move constructors
+    SwapchainManager(const SwapchainManager&) = delete;
+    SwapchainManager& operator=(const SwapchainManager&) = delete;
+    SwapchainManager(SwapchainManager&&) = delete;
+    SwapchainManager& operator=(SwapchainManager&&) = delete;
+
+    // Pending swapchain info management (internal)
+    void store_pending_info(WindowHandle hwnd, uint32_t width, uint32_t height);
+    bool retrieve_pending_info(WindowHandle hwnd, uint32_t& out_width, uint32_t& out_height);
+
+    // Swapchain resource management (internal)
+    bool initialize_swapchain(reshade::api::swapchain* swapchain_ptr);
+    void destroy_swapchain(SwapchainNativeHandle swapchain_handle);
+
+    // Query methods (internal)
+    SwapchainData* get_data(SwapchainNativeHandle swapchain_handle);
+    SwapchainData* find_active_data_for_device(reshade::api::device* device_ptr);
+
+    // High-level event handlers (internal - called by static callback wrappers)
     bool handle_create_swapchain(reshade::api::device_api api, reshade::api::swapchain_desc& desc, void* hwnd);
     void handle_init_swapchain(reshade::api::swapchain* swapchain_ptr, bool is_resize);
     void handle_bind_render_targets(reshade::api::command_list* cmd_list, uint32_t count,
@@ -81,16 +91,6 @@ public:
     void handle_present(reshade::api::command_queue* queue, reshade::api::swapchain* swapchain_ptr);
     bool handle_set_fullscreen_state(reshade::api::swapchain* swapchain_ptr, bool fullscreen, void* hmonitor);
     void handle_destroy_swapchain(reshade::api::swapchain* swapchain_ptr, bool is_resize);
-
-private:
-    SwapchainManager() = default;
-    ~SwapchainManager() = default;
-
-    // Delete copy/move constructors
-    SwapchainManager(const SwapchainManager&) = delete;
-    SwapchainManager& operator=(const SwapchainManager&) = delete;
-    SwapchainManager(SwapchainManager&&) = delete;
-    SwapchainManager& operator=(SwapchainManager&&) = delete;
 
     // Helper methods
     bool create_proxy_resources(SwapchainData* data, reshade::api::swapchain* swapchain_ptr);
