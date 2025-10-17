@@ -5,6 +5,7 @@
  */
 
 #include "window_hooks.h"
+#include "debug_logger.h"
 
 WindowHooks& WindowHooks::get_instance()
 {
@@ -176,8 +177,23 @@ bool WindowHooks::get_target_monitor_rect(RECT* out_rect)
 HWND WINAPI WindowHooks::hooked_CreateWindowExA(DWORD dwExStyle, LPCSTR lpClassName, LPCSTR lpWindowName, DWORD dwStyle, int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam)
 {
     auto& hooks = WindowHooks::get_instance();
+    const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
 
-    if (Config::get_instance().is_borderless_fullscreen_enabled())
+    if (config.is_debug_mode_enabled())
+    {
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("CreateWindowExA (Debug Mode: No Override)").c_str());
+
+        std::ostringstream info;
+        info << "  Window Title: " << (lpWindowName ? lpWindowName : "(null)") << "\n";
+        info << "  Style: " << logger.decode_window_style(dwStyle) << "\n";
+        info << "  Ex Style: " << logger.decode_window_ex_style(dwExStyle) << "\n";
+        info << "  Position: (" << X << ", " << Y << ")\n";
+        info << "  Size: " << nWidth << "x" << nHeight;
+        reshade::log::message(reshade::log::level::info, info.str().c_str());
+    }
+    else if (config.is_borderless_fullscreen_enabled())
     {
         // Modify to borderless fullscreen
         dwStyle = (dwStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE;
@@ -197,14 +213,45 @@ HWND WINAPI WindowHooks::hooked_CreateWindowExA(DWORD dwExStyle, LPCSTR lpClassN
         }
     }
 
-    return hooks.create_window_ex_a_hook_.call<HWND>(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y, nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam);
+    HWND result = hooks.create_window_ex_a_hook_.call<HWND>(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y, nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam);
+
+    if (config.is_debug_mode_enabled())
+    {
+        std::ostringstream result_info;
+        result_info << "  Result HWND: 0x" << std::hex << std::uppercase << reinterpret_cast<uintptr_t>(result);
+        reshade::log::message(reshade::log::level::info, result_info.str().c_str());
+    }
+
+    return result;
 }
 
 HWND WINAPI WindowHooks::hooked_CreateWindowExW(DWORD dwExStyle, LPCWSTR lpClassName, LPCWSTR lpWindowName, DWORD dwStyle, int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam)
 {
     auto& hooks = WindowHooks::get_instance();
+    const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
 
-    if (Config::get_instance().is_borderless_fullscreen_enabled())
+    if (config.is_debug_mode_enabled())
+    {
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("CreateWindowExW (Debug Mode: No Override)").c_str());
+
+        // Convert wide string to narrow string
+        char window_title[256] = "(null)";
+        if (lpWindowName != nullptr)
+        {
+            WideCharToMultiByte(CP_UTF8, 0, lpWindowName, -1, window_title, sizeof(window_title), nullptr, nullptr);
+        }
+
+        std::ostringstream info;
+        info << "  Window Title: " << window_title << "\n";
+        info << "  Style: " << logger.decode_window_style(dwStyle) << "\n";
+        info << "  Ex Style: " << logger.decode_window_ex_style(dwExStyle) << "\n";
+        info << "  Position: (" << X << ", " << Y << ")\n";
+        info << "  Size: " << nWidth << "x" << nHeight;
+        reshade::log::message(reshade::log::level::info, info.str().c_str());
+    }
+    else if (config.is_borderless_fullscreen_enabled())
     {
         // Modify to borderless fullscreen
         dwStyle = (dwStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE;
@@ -224,68 +271,252 @@ HWND WINAPI WindowHooks::hooked_CreateWindowExW(DWORD dwExStyle, LPCWSTR lpClass
         }
     }
 
-    return hooks.create_window_ex_w_hook_.call<HWND>(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y, nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam);
+    HWND result = hooks.create_window_ex_w_hook_.call<HWND>(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y, nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam);
+
+    if (config.is_debug_mode_enabled())
+    {
+        std::ostringstream result_info;
+        result_info << "  Result HWND: 0x" << std::hex << std::uppercase << reinterpret_cast<uintptr_t>(result);
+        reshade::log::message(reshade::log::level::info, result_info.str().c_str());
+    }
+
+    return result;
 }
 
 LONG WINAPI WindowHooks::hooked_SetWindowLongA(HWND hWnd, int nIndex, LONG dwNewLong)
 {
     auto& hooks = WindowHooks::get_instance();
+    const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
 
-    if (Config::get_instance().is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
+    if (config.is_debug_mode_enabled())
+    {
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("SetWindowLongA (Debug Mode: No Override)").c_str());
+
+        std::ostringstream info;
+        info << "  HWND: 0x" << std::hex << std::uppercase << reinterpret_cast<uintptr_t>(hWnd) << std::dec << "\n";
+        info << "  Index: " << nIndex;
+        if (nIndex == GWL_STYLE)
+        {
+            info << " (GWL_STYLE)\n";
+            info << "  New Style: " << logger.decode_window_style(static_cast<DWORD>(dwNewLong));
+        }
+        else if (nIndex == GWL_EXSTYLE)
+        {
+            info << " (GWL_EXSTYLE)\n";
+            info << "  New Ex Style: " << logger.decode_window_ex_style(static_cast<DWORD>(dwNewLong));
+        }
+        else
+        {
+            info << "\n";
+            info << "  New Value: 0x" << std::hex << std::uppercase << dwNewLong;
+        }
+        reshade::log::message(reshade::log::level::info, info.str().c_str());
+    }
+    else if (config.is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
     {
         // Force popup style, remove borders (cast to unsigned for bit operations)
         dwNewLong = static_cast<LONG>((static_cast<DWORD>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
     }
 
-    return hooks.set_window_long_a_hook_.call<LONG>(hWnd, nIndex, dwNewLong);
+    LONG result = hooks.set_window_long_a_hook_.call<LONG>(hWnd, nIndex, dwNewLong);
+
+    if (config.is_debug_mode_enabled())
+    {
+        std::ostringstream result_info;
+        result_info << "  Previous Value: 0x" << std::hex << std::uppercase << result;
+        reshade::log::message(reshade::log::level::info, result_info.str().c_str());
+    }
+
+    return result;
 }
 
 LONG WINAPI WindowHooks::hooked_SetWindowLongW(HWND hWnd, int nIndex, LONG dwNewLong)
 {
     auto& hooks = WindowHooks::get_instance();
+    const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
 
-    if (Config::get_instance().is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
+    if (config.is_debug_mode_enabled())
+    {
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("SetWindowLongW (Debug Mode: No Override)").c_str());
+
+        std::ostringstream info;
+        info << "  HWND: 0x" << std::hex << std::uppercase << reinterpret_cast<uintptr_t>(hWnd) << std::dec << "\n";
+        info << "  Index: " << nIndex;
+        if (nIndex == GWL_STYLE)
+        {
+            info << " (GWL_STYLE)\n";
+            info << "  New Style: " << logger.decode_window_style(static_cast<DWORD>(dwNewLong));
+        }
+        else if (nIndex == GWL_EXSTYLE)
+        {
+            info << " (GWL_EXSTYLE)\n";
+            info << "  New Ex Style: " << logger.decode_window_ex_style(static_cast<DWORD>(dwNewLong));
+        }
+        else
+        {
+            info << "\n";
+            info << "  New Value: 0x" << std::hex << std::uppercase << dwNewLong;
+        }
+        reshade::log::message(reshade::log::level::info, info.str().c_str());
+    }
+    else if (config.is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
     {
         // Force popup style, remove borders (cast to unsigned for bit operations)
         dwNewLong = static_cast<LONG>((static_cast<DWORD>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
     }
 
-    return hooks.set_window_long_w_hook_.call<LONG>(hWnd, nIndex, dwNewLong);
+    LONG result = hooks.set_window_long_w_hook_.call<LONG>(hWnd, nIndex, dwNewLong);
+
+    if (config.is_debug_mode_enabled())
+    {
+        std::ostringstream result_info;
+        result_info << "  Previous Value: 0x" << std::hex << std::uppercase << result;
+        reshade::log::message(reshade::log::level::info, result_info.str().c_str());
+    }
+
+    return result;
 }
 
 #ifdef _WIN64
 LONG_PTR WINAPI WindowHooks::hooked_SetWindowLongPtrA(HWND hWnd, int nIndex, LONG_PTR dwNewLong)
 {
     auto& hooks = WindowHooks::get_instance();
+    const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
 
-    if (Config::get_instance().is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
+    if (config.is_debug_mode_enabled())
+    {
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("SetWindowLongPtrA (Debug Mode: No Override)").c_str());
+
+        std::ostringstream info;
+        info << "  HWND: 0x" << std::hex << std::uppercase << reinterpret_cast<uintptr_t>(hWnd) << std::dec << "\n";
+        info << "  Index: " << nIndex;
+        if (nIndex == GWL_STYLE)
+        {
+            info << " (GWL_STYLE)\n";
+            info << "  New Style: " << logger.decode_window_style(static_cast<DWORD>(dwNewLong));
+        }
+        else if (nIndex == GWL_EXSTYLE)
+        {
+            info << " (GWL_EXSTYLE)\n";
+            info << "  New Ex Style: " << logger.decode_window_ex_style(static_cast<DWORD>(dwNewLong));
+        }
+        else
+        {
+            info << "\n";
+            info << "  New Value: 0x" << std::hex << std::uppercase << dwNewLong;
+        }
+        reshade::log::message(reshade::log::level::info, info.str().c_str());
+    }
+    else if (config.is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
     {
         // Force popup style, remove borders (cast to unsigned for bit operations)
         dwNewLong = static_cast<LONG_PTR>((static_cast<ULONG_PTR>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
     }
 
-    return hooks.set_window_long_ptr_a_hook_.call<LONG_PTR>(hWnd, nIndex, dwNewLong);
+    LONG_PTR result = hooks.set_window_long_ptr_a_hook_.call<LONG_PTR>(hWnd, nIndex, dwNewLong);
+
+    if (config.is_debug_mode_enabled())
+    {
+        std::ostringstream result_info;
+        result_info << "  Previous Value: 0x" << std::hex << std::uppercase << result;
+        reshade::log::message(reshade::log::level::info, result_info.str().c_str());
+    }
+
+    return result;
 }
 
 LONG_PTR WINAPI WindowHooks::hooked_SetWindowLongPtrW(HWND hWnd, int nIndex, LONG_PTR dwNewLong)
 {
     auto& hooks = WindowHooks::get_instance();
+    const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
 
-    if (Config::get_instance().is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
+    if (config.is_debug_mode_enabled())
+    {
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("SetWindowLongPtrW (Debug Mode: No Override)").c_str());
+
+        std::ostringstream info;
+        info << "  HWND: 0x" << std::hex << std::uppercase << reinterpret_cast<uintptr_t>(hWnd) << std::dec << "\n";
+        info << "  Index: " << nIndex;
+        if (nIndex == GWL_STYLE)
+        {
+            info << " (GWL_STYLE)\n";
+            info << "  New Style: " << logger.decode_window_style(static_cast<DWORD>(dwNewLong));
+        }
+        else if (nIndex == GWL_EXSTYLE)
+        {
+            info << " (GWL_EXSTYLE)\n";
+            info << "  New Ex Style: " << logger.decode_window_ex_style(static_cast<DWORD>(dwNewLong));
+        }
+        else
+        {
+            info << "\n";
+            info << "  New Value: 0x" << std::hex << std::uppercase << dwNewLong;
+        }
+        reshade::log::message(reshade::log::level::info, info.str().c_str());
+    }
+    else if (config.is_borderless_fullscreen_enabled() && nIndex == GWL_STYLE)
     {
         // Force popup style, remove borders (cast to unsigned for bit operations)
         dwNewLong = static_cast<LONG_PTR>((static_cast<ULONG_PTR>(dwNewLong) & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
     }
 
-    return hooks.set_window_long_ptr_w_hook_.call<LONG_PTR>(hWnd, nIndex, dwNewLong);
+    LONG_PTR result = hooks.set_window_long_ptr_w_hook_.call<LONG_PTR>(hWnd, nIndex, dwNewLong);
+
+    if (config.is_debug_mode_enabled())
+    {
+        std::ostringstream result_info;
+        result_info << "  Previous Value: 0x" << std::hex << std::uppercase << result;
+        reshade::log::message(reshade::log::level::info, result_info.str().c_str());
+    }
+
+    return result;
 }
 #endif
 
 BOOL WINAPI WindowHooks::hooked_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags)
 {
     auto& hooks = WindowHooks::get_instance();
+    const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
 
-    if (Config::get_instance().is_borderless_fullscreen_enabled())
+    if (config.is_debug_mode_enabled())
+    {
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("SetWindowPos (Debug Mode: No Override)").c_str());
+
+        std::ostringstream info;
+        info << "  HWND: 0x" << std::hex << std::uppercase << reinterpret_cast<uintptr_t>(hWnd) << std::dec << "\n";
+        info << "  Position: (" << X << ", " << Y << ")\n";
+        info << "  Size: " << cx << "x" << cy << "\n";
+        info << "  Flags: 0x" << std::hex << std::uppercase << uFlags << std::dec;
+
+        // Decode common flags
+        std::ostringstream flags_str;
+        bool first = true;
+        if (uFlags & SWP_NOMOVE) { if (!first) flags_str << " | "; flags_str << "SWP_NOMOVE"; first = false; }
+        if (uFlags & SWP_NOSIZE) { if (!first) flags_str << " | "; flags_str << "SWP_NOSIZE"; first = false; }
+        if (uFlags & SWP_NOZORDER) { if (!first) flags_str << " | "; flags_str << "SWP_NOZORDER"; first = false; }
+        if (uFlags & SWP_NOACTIVATE) { if (!first) flags_str << " | "; flags_str << "SWP_NOACTIVATE"; first = false; }
+        if (uFlags & SWP_FRAMECHANGED) { if (!first) flags_str << " | "; flags_str << "SWP_FRAMECHANGED"; first = false; }
+        if (uFlags & SWP_SHOWWINDOW) { if (!first) flags_str << " | "; flags_str << "SWP_SHOWWINDOW"; first = false; }
+        if (uFlags & SWP_HIDEWINDOW) { if (!first) flags_str << " | "; flags_str << "SWP_HIDEWINDOW"; first = false; }
+
+        if (!flags_str.str().empty())
+        {
+            info << " (" << flags_str.str() << ")";
+        }
+
+        reshade::log::message(reshade::log::level::info, info.str().c_str());
+    }
+    else if (config.is_borderless_fullscreen_enabled())
     {
         // Don't modify if both SWP_NOSIZE and SWP_NOMOVE are set
         if ((uFlags & SWP_NOSIZE) && (uFlags & SWP_NOMOVE))
@@ -307,31 +538,121 @@ BOOL WINAPI WindowHooks::hooked_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, in
         }
     }
 
-    return hooks.set_window_pos_hook_.call<BOOL>(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
+    BOOL result = hooks.set_window_pos_hook_.call<BOOL>(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
+
+    if (config.is_debug_mode_enabled())
+    {
+        std::ostringstream result_info;
+        result_info << "  Result: " << (result ? "TRUE" : "FALSE");
+        reshade::log::message(reshade::log::level::info, result_info.str().c_str());
+    }
+
+    return result;
 }
 
 BOOL WINAPI WindowHooks::hooked_AdjustWindowRect(LPRECT lpRect, DWORD dwStyle, BOOL bMenu)
 {
     auto& hooks = WindowHooks::get_instance();
+    const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
 
-    if (Config::get_instance().is_borderless_fullscreen_enabled())
+    if (config.is_debug_mode_enabled())
     {
-        // Return the rect unchanged (pretend no window decoration)
-        return TRUE;
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("AdjustWindowRect (Debug Mode: No Override)").c_str());
+
+        std::ostringstream info;
+        if (lpRect != nullptr)
+        {
+            info << "  Input Rect: (" << lpRect->left << ", " << lpRect->top << ")-("
+                 << lpRect->right << ", " << lpRect->bottom << ")\n";
+        }
+        else
+        {
+            info << "  Input Rect: (null)\n";
+        }
+        info << "  Style: " << logger.decode_window_style(dwStyle) << "\n";
+        info << "  Has Menu: " << (bMenu ? "Yes" : "No");
+        reshade::log::message(reshade::log::level::info, info.str().c_str());
     }
 
-    return hooks.adjust_window_rect_hook_.call<BOOL>(lpRect, dwStyle, bMenu);
+    BOOL result;
+    if (config.is_borderless_fullscreen_enabled())
+    {
+        // Return the rect unchanged (pretend no window decoration)
+        result = TRUE;
+    }
+    else
+    {
+        result = hooks.adjust_window_rect_hook_.call<BOOL>(lpRect, dwStyle, bMenu);
+    }
+
+    if (config.is_debug_mode_enabled())
+    {
+        std::ostringstream result_info;
+        result_info << "  Result: " << (result ? "TRUE" : "FALSE");
+        if (lpRect != nullptr && result)
+        {
+            result_info << "\n";
+            result_info << "  Output Rect: (" << lpRect->left << ", " << lpRect->top << ")-("
+                        << lpRect->right << ", " << lpRect->bottom << ")";
+        }
+        reshade::log::message(reshade::log::level::info, result_info.str().c_str());
+    }
+
+    return result;
 }
 
 BOOL WINAPI WindowHooks::hooked_AdjustWindowRectEx(LPRECT lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle)
 {
     auto& hooks = WindowHooks::get_instance();
+    const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
 
-    if (Config::get_instance().is_borderless_fullscreen_enabled())
+    if (config.is_debug_mode_enabled())
     {
-        // Return the rect unchanged (pretend no window decoration)
-        return TRUE;
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("AdjustWindowRectEx (Debug Mode: No Override)").c_str());
+
+        std::ostringstream info;
+        if (lpRect != nullptr)
+        {
+            info << "  Input Rect: (" << lpRect->left << ", " << lpRect->top << ")-("
+                 << lpRect->right << ", " << lpRect->bottom << ")\n";
+        }
+        else
+        {
+            info << "  Input Rect: (null)\n";
+        }
+        info << "  Style: " << logger.decode_window_style(dwStyle) << "\n";
+        info << "  Ex Style: " << logger.decode_window_ex_style(dwExStyle) << "\n";
+        info << "  Has Menu: " << (bMenu ? "Yes" : "No");
+        reshade::log::message(reshade::log::level::info, info.str().c_str());
     }
 
-    return hooks.adjust_window_rect_ex_hook_.call<BOOL>(lpRect, dwStyle, bMenu, dwExStyle);
+    BOOL result;
+    if (config.is_borderless_fullscreen_enabled())
+    {
+        // Return the rect unchanged (pretend no window decoration)
+        result = TRUE;
+    }
+    else
+    {
+        result = hooks.adjust_window_rect_ex_hook_.call<BOOL>(lpRect, dwStyle, bMenu, dwExStyle);
+    }
+
+    if (config.is_debug_mode_enabled())
+    {
+        std::ostringstream result_info;
+        result_info << "  Result: " << (result ? "TRUE" : "FALSE");
+        if (lpRect != nullptr && result)
+        {
+            result_info << "\n";
+            result_info << "  Output Rect: (" << lpRect->left << ", " << lpRect->top << ")-("
+                        << lpRect->right << ", " << lpRect->bottom << ")";
+        }
+        reshade::log::message(reshade::log::level::info, result_info.str().c_str());
+    }
+
+    return result;
 }
