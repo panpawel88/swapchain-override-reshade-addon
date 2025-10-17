@@ -94,6 +94,7 @@ private:
     SwapchainData* find_active_data_for_device(reshade::api::device* device_ptr);
 
     // High-level event handlers (internal - called by static callback wrappers)
+    void handle_init_device(reshade::api::device* device);
     bool handle_create_swapchain(reshade::api::device_api api, reshade::api::swapchain_desc& desc, void* hwnd);
     void handle_init_swapchain(reshade::api::swapchain* swapchain_ptr, bool is_resize);
     void handle_bind_render_targets(reshade::api::command_list* cmd_list, uint32_t count,
@@ -103,6 +104,7 @@ private:
     void handle_bind_scissor_rects(reshade::api::command_list* cmd_list, uint32_t first, uint32_t count,
                                     const reshade::api::rect* rects);
     void handle_present(reshade::api::command_queue* queue, reshade::api::swapchain* swapchain_ptr);
+    void handle_finish_present(reshade::api::command_queue* queue, reshade::api::swapchain* swapchain_ptr);
     bool handle_set_fullscreen_state(reshade::api::swapchain* swapchain_ptr, bool fullscreen, void* hmonitor);
     void handle_destroy_swapchain(reshade::api::swapchain* swapchain_ptr, bool is_resize);
 
@@ -111,6 +113,7 @@ private:
     bool create_copy_pipeline(SwapchainData* data, reshade::api::format format);
 
     // ReShade event callback implementations (static wrappers)
+    static void on_init_device(reshade::api::device* device);
     static bool on_create_swapchain(reshade::api::device_api api, reshade::api::swapchain_desc& desc, void* hwnd);
     static void on_init_swapchain(reshade::api::swapchain* swapchain_ptr, bool is_resize);
     static void on_bind_render_targets_and_depth_stencil(reshade::api::command_list* cmd_list, uint32_t count,
@@ -122,6 +125,7 @@ private:
     static void on_present(reshade::api::command_queue* queue, reshade::api::swapchain* swapchain_ptr,
                            const reshade::api::rect* source_rect, const reshade::api::rect* dest_rect,
                            uint32_t dirty_rect_count, const reshade::api::rect* dirty_rects);
+    static void on_finish_present(reshade::api::command_queue* queue, reshade::api::swapchain* swapchain_ptr);
     static bool on_set_fullscreen_state(reshade::api::swapchain* swapchain_ptr, bool fullscreen, void* hmonitor);
     static void on_destroy_swapchain(reshade::api::swapchain* swapchain_ptr, bool is_resize);
 

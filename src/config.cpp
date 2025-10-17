@@ -106,4 +106,11 @@ void Config::load()
         reshade::set_config_value(nullptr, CONFIG_SECTION, "TargetMonitor", 0);
         target_monitor_ = 0;
     }
+
+    // Read debug mode
+    if (!reshade::get_config_value(nullptr, CONFIG_SECTION, "DebugMode", debug_mode_))
+    {
+        reshade::set_config_value(nullptr, CONFIG_SECTION, "DebugMode", false);
+        debug_mode_ = false;
+    }
 }

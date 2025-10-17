@@ -6,6 +6,7 @@
 
 #include "swapchain_manager.h"
 #include "config.h"
+#include "debug_logger.h"
 #include "shader_bytecode.h"
 
 using namespace reshade::api;
@@ -627,7 +628,20 @@ void SwapchainManager::handle_present(command_queue* queue, swapchain* swapchain
 bool SwapchainManager::handle_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd)
 {
     const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
     bool modified = false;
+
+    // Debug logging
+    if (config.is_debug_mode_enabled())
+    {
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("CREATE_SWAPCHAIN (Debug Mode: No Override)").c_str());
+        logger.log_swapchain_desc(desc, hwnd);
+        reshade::log::message(reshade::log::level::info, ("  Device API: " + std::string(logger.device_api_to_string(api))).c_str());
+
+        // In debug mode, don't modify anything
+        return false;
+    }
 
     // Handle resolution override
     if (config.is_resolution_override_enabled())
@@ -700,8 +714,40 @@ void SwapchainManager::handle_init_swapchain(swapchain* swapchain_ptr, bool is_r
     if (swapchain_ptr == nullptr)
         return;
 
-    // Skip if override is disabled
     const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
+    device* device_ptr = swapchain_ptr->get_device();
+
+    // Debug logging
+    if (config.is_debug_mode_enabled())
+    {
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("INIT_SWAPCHAIN").c_str());
+
+        // Get actual swapchain description
+        if (device_ptr != nullptr)
+        {
+            logger.log_device_info(device_ptr);
+
+            // Log DXGI state
+            const device_api api = device_ptr->get_api();
+            logger.log_dxgi_state(reinterpret_cast<void*>(swapchain_ptr->get_native()), api);
+        }
+
+        // Log window state
+        WindowHandle hwnd = swapchain_ptr->get_hwnd();
+        if (hwnd != nullptr)
+        {
+            logger.log_window_state(static_cast<HWND>(hwnd));
+        }
+
+        reshade::log::message(reshade::log::level::info, ("  Resize Event: " + std::string(is_resize ? "true" : "false")).c_str());
+
+        // In debug mode, don't initialize proxy system
+        return;
+    }
+
+    // Skip if override is disabled
     if (!config.is_resolution_override_enabled())
         return;
 
@@ -720,7 +766,6 @@ void SwapchainManager::handle_init_swapchain(swapchain* swapchain_ptr, bool is_r
     // Transition to exclusive fullscreen if configured (only on initial creation, not resize)
     if (!is_resize && config.is_exclusive_fullscreen_enabled())
     {
-        device* device_ptr = swapchain_ptr->get_device();
         if (device_ptr == nullptr)
             return;
 
@@ -742,8 +787,7 @@ void SwapchainManager::handle_init_swapchain(swapchain* swapchain_ptr, bool is_r
                 else
                 {
                     reshade::log::message(reshade::log::level::error,
-                        ("Failed to transition to exclusive fullscreen (HRESULT: 0x" +
-                        std::to_string(static_cast<unsigned long>(hr)) + ")").c_str());
+                        ("Failed to transition to exclusive fullscreen " + logger.format_hresult(hr)).c_str());
                 }
             }
         }
@@ -761,6 +805,25 @@ bool SwapchainManager::handle_set_fullscreen_state(swapchain* swapchain_ptr, boo
         return false;
 
     const Config& config = Config::get_instance();
+    DebugLogger& logger = DebugLogger::get_instance();
+
+    // Debug logging
+    if (config.is_debug_mode_enabled())
+    {
+        logger.get_next_sequence();
+        reshade::log::message(reshade::log::level::info, logger.format_event_header("SET_FULLSCREEN_STATE").c_str());
+        reshade::log::message(reshade::log::level::info, ("  Requested State: " + std::string(fullscreen ? "fullscreen" : "windowed")).c_str());
+
+        if (hmonitor != nullptr)
+        {
+            logger.log_monitor_info(static_cast<HMONITOR>(hmonitor));
+        }
+
+        reshade::log::message(reshade::log::level::info, "  Action: Allow (debug mode)");
+
+        // In debug mode, don't block anything
+        return false;
+    }
 
     // If exclusive mode is forced:
     // - Allow transitions TO fullscreen (including our own internal transition)
@@ -818,32 +881,68 @@ void SwapchainManager::handle_destroy_swapchain(swapchain* swapchain_ptr, bool i
     destroy_swapchain(swapchain_handle);
 }
 
+void SwapchainManager::handle_init_device(device* device)
+{
+    if (device == nullptr)
+        return;
+
+    const Config& config = Config::get_instance();
+    if (!config.is_debug_mode_enabled())
+        return;
+
+    DebugLogger& logger = DebugLogger::get_instance();
+    logger.get_next_sequence();
+    reshade::log::message(reshade::log::level::info, logger.format_event_header("INIT_DEVICE").c_str());
+    logger.log_device_info(device);
+}
+
+void SwapchainManager::handle_finish_present(command_queue* queue, swapchain* swapchain_ptr)
+{
+    if (swapchain_ptr == nullptr)
+        return;
+
+    const Config& config = Config::get_instance();
+    if (!config.is_debug_mode_enabled())
+        return;
+
+    // Note: We don't log every frame to avoid spam - could add throttling here if needed
+}
+
 // Install/uninstall methods
 void SwapchainManager::install()
 {
+    reshade::register_event<reshade::addon_event::init_device>(on_init_device);
     reshade::register_event<reshade::addon_event::create_swapchain>(on_create_swapchain);
     reshade::register_event<reshade::addon_event::init_swapchain>(on_init_swapchain);
     reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(on_bind_render_targets_and_depth_stencil);
     reshade::register_event<reshade::addon_event::bind_viewports>(on_bind_viewports);
     reshade::register_event<reshade::addon_event::bind_scissor_rects>(on_bind_scissor_rects);
     reshade::register_event<reshade::addon_event::present>(on_present);
+    reshade::register_event<reshade::addon_event::finish_present>(on_finish_present);
     reshade::register_event<reshade::addon_event::set_fullscreen_state>(on_set_fullscreen_state);
     reshade::register_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
 }
 
 void SwapchainManager::uninstall()
 {
+    reshade::unregister_event<reshade::addon_event::init_device>(on_init_device);
     reshade::unregister_event<reshade::addon_event::create_swapchain>(on_create_swapchain);
     reshade::unregister_event<reshade::addon_event::init_swapchain>(on_init_swapchain);
     reshade::unregister_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(on_bind_render_targets_and_depth_stencil);
     reshade::unregister_event<reshade::addon_event::bind_viewports>(on_bind_viewports);
     reshade::unregister_event<reshade::addon_event::bind_scissor_rects>(on_bind_scissor_rects);
     reshade::unregister_event<reshade::addon_event::present>(on_present);
+    reshade::unregister_event<reshade::addon_event::finish_present>(on_finish_present);
     reshade::unregister_event<reshade::addon_event::set_fullscreen_state>(on_set_fullscreen_state);
     reshade::unregister_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
 }
 
 // Static callback wrappers
+void SwapchainManager::on_init_device(device* device)
+{
+    get_instance().handle_init_device(device);
+}
+
 bool SwapchainManager::on_create_swapchain(device_api api, swapchain_desc& desc, void* hwnd)
 {
     return get_instance().handle_create_swapchain(api, desc, hwnd);
@@ -876,6 +975,11 @@ void SwapchainManager::on_present(command_queue* queue, swapchain* swapchain_ptr
                                    const rect*, const rect*, uint32_t, const rect*)
 {
     get_instance().handle_present(queue, swapchain_ptr);
+}
+
+void SwapchainManager::on_finish_present(command_queue* queue, swapchain* swapchain_ptr)
+{
+    get_instance().handle_finish_present(queue, swapchain_ptr);
 }
 
 bool SwapchainManager::on_set_fullscreen_state(swapchain* swapchain_ptr, bool fullscreen, void* hmonitor)

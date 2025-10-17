@@ -11,6 +11,7 @@
 
 #include "common.h"
 #include "config.h"
+#include "debug_logger.h"
 #include "window_hooks.h"
 #include "swapchain_manager.h"
 #include "overlay.h"
@@ -27,6 +28,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
         // Register this module as a ReShade addon
         if (!reshade::register_addon(hModule))
             return FALSE;
+
+        // Initialize debug logger
+        DebugLogger::get_instance().initialize();
 
         // Load configuration
         Config::get_instance().load();

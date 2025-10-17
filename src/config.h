@@ -37,6 +37,7 @@ public:
     bool is_exclusive_fullscreen_enabled() const { return fullscreen_mode_ == FullscreenMode::Exclusive; }
     bool is_borderless_fullscreen_enabled() const { return fullscreen_mode_ == FullscreenMode::Borderless; }
     bool is_fullscreen_mode_overridden() const { return fullscreen_mode_ != FullscreenMode::Unchanged; }
+    bool is_debug_mode_enabled() const { return debug_mode_; }
 
 private:
     Config() = default;
@@ -55,4 +56,5 @@ private:
     FullscreenMode fullscreen_mode_ = FullscreenMode::Unchanged;
     bool block_fullscreen_changes_ = false;
     int target_monitor_ = 0; // 0 = primary, 1+ = secondary monitors
+    bool debug_mode_ = false; // When enabled, log all events without modifying behavior
 };

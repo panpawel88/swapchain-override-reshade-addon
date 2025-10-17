@@ -109,6 +109,15 @@ void OverlayManager::render_overlay(effect_runtime* runtime)
     ImGui::TextUnformatted("Configuration:", nullptr);
     ImGui::Separator();
 
+    // Debug mode indicator
+    if (config.is_debug_mode_enabled())
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.0f, 1.0f)); // Orange text
+        ImGui::TextUnformatted("  DEBUG MODE: Passive Logging Only", nullptr);
+        ImGui::PopStyleColor();
+        ImGui::Separator();
+    }
+
     // Resolution override
     if (config.is_resolution_override_enabled())
     {
